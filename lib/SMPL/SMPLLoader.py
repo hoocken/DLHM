@@ -50,18 +50,6 @@ class SMPLLoader(pickle.Unpickler, nn.Module):
             for child_id, parent_id in zip(self.data['kintree_table'][1],self.data['kintree_table'][0])
         }
         self.trans2torch()
-
-    # Save to an .obj file       
-    def save_obj(self,fname = './test_smpl.obj'):
-        with open( fname, 'w') as fp:
-            for v in self.data['v']:
-                fp.write( 'v %f %f %f\n' % ( v[0], v[1], v[2]) )
-            # Faces are 1-based, not 0-based in obj files
-            for f in self.data['f']+1:
-                fp.write( 'f %d %d %d\n' %  (f[0], f[1], f[2]) )
-        # todo: save UV texture
-        print('Save to ', fname)
-
       
     # help pickle to load pkl file
     def find_class(self, module, name):
