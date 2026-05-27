@@ -16,7 +16,6 @@ class Chamfer(nn.Module):
         temp = x[:, None, :]
         temp_target = target[None, :, :]
         dist = torch.norm(temp - temp_target, p=2, dim=-1).pow(2) # (N, M)
-        print(dist)
         min_x = dist.amin(dim=1) # min target for a fixed x
         min_target = dist.amin(dim=0) # min x for a fixed target
         return min_x.mean() + min_target.mean()

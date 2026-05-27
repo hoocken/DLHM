@@ -18,7 +18,7 @@ class SMPL(nn.Module):
         """
         Takes trans, pose, and betas to return vertices
         """
-         # cal body shapes
+        # cal body shapes
         v_shaped = self.data['shapedirs'] @ betas + self.data['v_template'] 
         # cal joint location
         self.J = self.data['J_regressor'] @ v_shaped
@@ -71,3 +71,13 @@ class SMPL(nn.Module):
         dot = A @ r_hat
         R = cos * i_cube + (1 - cos) * dot + torch.sin(theta) * m
         return R
+    
+    def save_obj(self, vertices, fname = './test_smpl.obj'):
+        with open( fname, 'w') as fp:
+            for v in vertices:
+                fp.write( 'v %f %f %f\n' % ( v[0], v[1], v[2]) )
+            # Faces are 1-based, not 0-based in obj files
+            for f in self.data['f']+1:
+                fp.write( 'f %d %d %d\n' %  (f[0], f[1], f[2]) )
+        # todo: save UV texture
+        print('Save to ', fname)

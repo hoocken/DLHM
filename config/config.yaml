@@ -2,6 +2,7 @@ model:
   base_model: data/models/basicmodel_m_lbs_10_207_0_v1.0.0.pkl
   scan: data/tr_scan_000.ply
   epoch: 100
-  step_size: 50
+  step_size: 40
   decay: 0.2
-  lr: 0.001
+  lr: 0.1
+  downsample: 6980

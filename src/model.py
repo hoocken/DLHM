@@ -20,10 +20,12 @@ class Registration(nn.Module):
         self.path = config.base_model
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.smpl = SMPL(self.path, self.device)
+        self.downsample = config.downsample
         
         self.point_cloud = self._load_ply_as_tensor(config.scan)  
 
         self._initalize_parameters()
+        self.to(self.device)
 
         self.criterion = Chamfer()
         self.optimizer = Adam(nn.ParameterList([self.trans, self.pose, self.betas]), lr=config.lr)
@@ -32,28 +34,32 @@ class Registration(nn.Module):
         self.epoch = config.epoch
 
     def _initalize_parameters(self):
-        self.trans = nn.Parameter(torch.zeros(3, dtype=torch.float32)).to(device=self.device)
-        self.pose = nn.Parameter(torch.rand(self.smpl.pose_shape, dtype=torch.float32) - 0.5).to(device=self.device)
-        self.betas = nn.Parameter((torch.rand(self.smpl.beta_shape, dtype=torch.float32) - 0.5) * 0.6).to(device=self.device)
+        self.trans = nn.Parameter(torch.zeros(3, dtype=torch.float32))
+        self.pose = nn.Parameter(torch.zeros(self.smpl.pose_shape, dtype=torch.float32))
+        self.betas = nn.Parameter(torch.zeros(self.smpl.beta_shape, dtype=torch.float32))
 
     def _load_ply_as_tensor(self, path: str):
         point_cloud = o3d.io.read_point_cloud(path)
-        return torch.from_numpy(np.asarray(point_cloud.points)).to(device=self.device)
+        downsampled = point_cloud.random_down_sample(self.downsample / np.asarray(point_cloud.points).shape[0])
+        return torch.from_numpy(np.asarray(downsampled.points)).to(device=self.device)
     
     def fit(self):
-        pbar = tqdm(total=self.epoch, ncols=0, desc="Train")
+        pbar = tqdm(total=self.epoch, ncols=0, desc="Fit")
         for i in range(self.epoch):
             model = self.smpl(self.trans, self.pose, self.betas)
             loss = self.criterion(model, self.point_cloud)
-
+            
             self.optimizer.zero_grad()
+            
             loss.backward()
 
             self.optimizer.step()
             self.scheduler.step() 
 
             pbar.update(1)
-            pbar.set_postfix(loss=loss)
+            pbar.set_postfix(loss=loss.item())
 
+        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas))
+    
         
 
