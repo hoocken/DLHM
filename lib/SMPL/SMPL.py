@@ -72,7 +72,7 @@ class SMPL(nn.Module):
         R = cos * i_cube + (1 - cos) * dot + torch.sin(theta) * m
         return R
     
-    def save_obj(self, vertices, fname = './test_smpl.obj'):
+    def save_obj(self, vertices, fname):
         with open( fname, 'w') as fp:
             for v in vertices:
                 fp.write( 'v %f %f %f\n' % ( v[0], v[1], v[2]) )

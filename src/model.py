@@ -1,6 +1,9 @@
 """
 Optimize a given model with a 3d point cloud using Chamfer distance
 """
+from pathlib import Path
+
+import hydra
 import open3d as o3d
 import torch
 import torch.nn as nn
@@ -18,9 +21,15 @@ class Registration(nn.Module):
 
         self.config = config 
         self.path = config.base_model
+        
+        base_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+        file_name = Path(config.scan).stem
+        self.output_dir = base_dir / file_name
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.smpl = SMPL(self.path, self.device)
-        self.downsample = config.downsample
+        self.voxel_size = config.voxel_size
         
         self.point_cloud = self._load_ply_as_tensor(config.scan)  
 
@@ -31,6 +40,7 @@ class Registration(nn.Module):
         self.optimizer = Adam(nn.ParameterList([self.trans, self.pose, self.betas]), lr=config.lr)
         self.scheduler = StepLR(self.optimizer, step_size=config.step_size, gamma=config.decay)
 
+
         self.epoch = config.epoch
 
     def _initalize_parameters(self):
@@ -40,7 +50,8 @@ class Registration(nn.Module):
 
     def _load_ply_as_tensor(self, path: str):
         point_cloud = o3d.io.read_point_cloud(path)
-        downsampled = point_cloud.random_down_sample(self.downsample / np.asarray(point_cloud.points).shape[0])
+        downsampled = point_cloud.voxel_down_sample(self.voxel_size)
+        o3d.io.write_point_cloud(self.output_dir / 'point_cloud.ply', downsampled)
         return torch.from_numpy(np.asarray(downsampled.points)).to(device=self.device)
     
     def fit(self):
@@ -59,7 +70,5 @@ class Registration(nn.Module):
             pbar.update(1)
             pbar.set_postfix(loss=loss.item())
 
-        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas))
-    
-        
+        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / 'smpl_fit.obj')
 
