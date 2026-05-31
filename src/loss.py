@@ -31,7 +31,7 @@ class DataLoss(nn.Module):
         return p.sum()
     
 class PriorLoss(nn.Module):
-    def __init__(self, device, means, covs):
+    def __init__(self, means, covs):
         """
         Prior loss towards the pose according to ClothCap paper.
         However, this prior is instead a GMM, with only 69-dimensional
@@ -39,10 +39,6 @@ class PriorLoss(nn.Module):
         """
         super(PriorLoss, self).__init__()
 
-        with open(prior_path, 'rb') as f:
-            gmm = pickle.load(f, encoding='latin1')
-
-        self.device = device
         self.means = means
         self.covs = covs
         self.inv_covs = self.covs.inverse()
