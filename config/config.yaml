@@ -1,8 +1,11 @@
 model:
-  base_model: data/models/basicmodel_m_lbs_10_207_0_v1.0.0.pkl
-  scan: data/tr_scan_039.ply
-  epoch: 5
-  step_size: 500
+  base_model: data/models/basicModel_f_lbs_10_207_0_v1.0.0.pkl
+  scan: data/tr_scan_066.ply
+  prior: data/prior/gmm_08.pkl
+  epoch: 2000
+  step_size: 1500
   decay: 0.2
-  lr: 0.01
-  voxel_size: 0.015
+  lr: 0.015
+  voxel_size: 0.02
+  lambda_normal: 0.1
+  sigma: 2
