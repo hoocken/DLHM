@@ -17,7 +17,7 @@ from lib.SMPL import SMPL
 from .loss import DataLoss, PriorLoss
 
 class Registration(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, initial_pose, means, covs):
         super(Registration, self).__init__()
 
         self.config = config 
@@ -34,28 +34,28 @@ class Registration(nn.Module):
         
         self.point_cloud = self._load_ply_as_tensor(config.scan)  
 
-        with open(config.prior, 'rb') as f:
-            gmm = pickle.load(f, encoding='latin1')
+        self.means = means.to(self.device)
+        self.covs = covs.to(self.device)
 
-        self.means = torch.from_numpy(gmm['means'].astype(np.float32)).to(self.device)
-        self.covs = torch.from_numpy(gmm['covars'].astype(np.float32)).to(self.device)
-
-        self._initalize_parameters()
+        self._initalize_parameters(initial_pose)
         self.to(self.device)
 
         self.data_loss = DataLoss(config.sigma)
-        self.prior_loss = PriorLoss(self.device, self.means, self.covs)
+        self.prior_loss = PriorLoss(self.means, self.covs)
         # self.normal_loss = NormalConsistency()
         self.optimizer = Adam(nn.ParameterList([self.trans, self.pose, self.betas]), lr=config.lr)
         self.scheduler = StepLR(self.optimizer, step_size=config.step_size, gamma=config.decay)
 
+        self.step_size = config.step_size
+        self.lambda_prior = config.lambda_prior.weight
+        self.lambda_prior_decay = config.lambda_prior.weight_decay
+        self.lambda_prior_decay_step = config.lambda_prior.decay_step
 
         self.epoch = config.epoch
 
-    def _initalize_parameters(self):
-        N = self.means.shape[0]
+    def _initalize_parameters(self, initial_pose):
         self.trans = nn.Parameter(torch.zeros(3, dtype=torch.float32))
-        self.pose = nn.Parameter(torch.zeros(self.smpl.pose_shape, dtype=torch.float32))
+        self.pose = nn.Parameter(torch.hstack([torch.zeros(3, dtype=torch.float32), initial_pose]))
         self.betas = nn.Parameter(torch.zeros(self.smpl.beta_shape, dtype=torch.float32))
 
     def _load_ply_as_tensor(self, path: str):
@@ -73,9 +73,13 @@ class Registration(nn.Module):
         return points
         # return torch.from_numpy(np.asarray(downsampled.points)).to(device=self.device)
     
-    def fit(self):
-        pbar = tqdm(total=self.epoch, ncols=0, desc="Fit")
-        for i in range(self.epoch):
+    def decay_weight(self, decay, weight, epoch, decay_every):
+        return (decay ** (epoch // decay_every)) * weight
+    
+    def fit(self, start=0):
+        pbar = tqdm(total=self.epoch, initial=start, ncols=0, desc="Fit")
+        total_loss = -1
+        for i in range(start, self.epoch):
             model = self.smpl(self.trans, self.pose, self.betas)
             # Chamfer distance
             data = self.data_loss(model, self.point_cloud)
@@ -87,7 +91,8 @@ class Registration(nn.Module):
                                     # self.point_cloud, self.point_normals)
             
             # Combined loss
-            total_loss = data + 0.001 * prior
+            lambda_prior = self.decay_weight(self.lambda_prior_decay, self.lambda_prior, i, self.lambda_prior_decay_step)
+            total_loss = data + lambda_prior * prior
             
             
             self.optimizer.zero_grad()
@@ -100,6 +105,9 @@ class Registration(nn.Module):
             pbar.update(1)
             pbar.set_postfix(loss=total_loss.item())
 
+        return total_loss
+
+    def save_smpl(self):
         self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / 'smpl_fit.obj')
 
     # def compute_mesh_normals(self, vertices):
