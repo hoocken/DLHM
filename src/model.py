@@ -14,10 +14,10 @@ from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
 
 from lib.SMPL import SMPL
-from .loss import DataLoss, PriorLoss
+from .loss import DataLoss, PosePriorLoss, ShapePriorLoss
 
 class Registration(nn.Module):
-    def __init__(self, config, initial_pose, means, covs):
+    def __init__(self, config, initial_pose, means, covs, weights):
         super(Registration, self).__init__()
 
         self.config = config 
@@ -36,12 +36,14 @@ class Registration(nn.Module):
 
         self.means = means.to(self.device)
         self.covs = covs.to(self.device)
+        self.weights = weights.to(self.device)
 
         self._initalize_parameters(initial_pose)
         self.to(self.device)
 
         self.data_loss = DataLoss(config.sigma)
-        self.prior_loss = PriorLoss(self.means, self.covs)
+        self.pose_prior_loss = PosePriorLoss(self.means, self.covs, self.weights)
+        self.shape_prior_loss = ShapePriorLoss()
         # self.normal_loss = NormalConsistency()
         self.optimizer = Adam(nn.ParameterList([self.trans, self.pose, self.betas]), lr=config.lr)
         self.scheduler = StepLR(self.optimizer, step_size=config.step_size, gamma=config.decay)
@@ -83,7 +85,8 @@ class Registration(nn.Module):
             model = self.smpl(self.trans, self.pose, self.betas)
             # Chamfer distance
             data = self.data_loss(model, self.point_cloud)
-            prior = self.prior_loss(self.pose[3:])
+            pose_prior = self.pose_prior_loss(self.pose[3:])
+            shape_prior = self.shape_prior_loss(self.betas)
             
             # Normal consistency
             # mesh_normals = self.compute_mesh_normals(model)
@@ -91,8 +94,8 @@ class Registration(nn.Module):
                                     # self.point_cloud, self.point_normals)
             
             # Combined loss
-            lambda_prior = self.decay_weight(self.lambda_prior_decay, self.lambda_prior, i, self.lambda_prior_decay_step)
-            total_loss = data + lambda_prior * prior
+            lambda_pose_prior = self.decay_weight(self.lambda_prior_decay, self.lambda_prior, i, self.lambda_prior_decay_step)
+            total_loss = data + lambda_pose_prior * pose_prior + lambda_pose_prior * shape_prior
             
             
             self.optimizer.zero_grad()

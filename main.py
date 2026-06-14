@@ -13,13 +13,16 @@ def argsort(seq):
 def main(config):
     with open(config.model.prior, 'rb') as f:
         gmm = pickle.load(f, encoding='latin1')
+        
 
     means = torch.from_numpy(gmm['means'].astype(np.float32))
     covs = torch.from_numpy(gmm['covars'].astype(np.float32))
+    weights = torch.from_numpy(gmm['weights'].astype(np.float32))
 
-    N = means.shape[0]
+    mean_shape = means.mean(0)
     losses = []
-    optimizers = [Registration(config.model, means[count], means, covs) for count in range(N)]
+    N = means.shape[0]
+    optimizers = [Registration(config.model, mean_shape, means, covs, weights) for count in range(0, 1)]
     indices = list(range(N))
     epoch_scaling = 3
     # min_loss = -1
@@ -27,7 +30,7 @@ def main(config):
     # min_count = -1
     start = 0
     while True:
-        for count in range(N):
+        for count in range(len(optimizers)):
             print(f"Fitting initial pose #{indices[count] + 1}:")
             optimizer = optimizers[count]
             loss = optimizer.fit(start)

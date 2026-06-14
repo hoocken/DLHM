@@ -5,11 +5,11 @@ model:
   epoch: 120
   step_size: 2500
   decay: 0.2
-  lr: 0.02
+  lr: 0.04
   voxel_size: 0.015
   lambda_normal: 0.1
   lambda_prior:
-    weight: 0.0005
+    weight: 0.5
     weight_decay: 0.1
-    decay_step: 1000
+    decay_step: 200
   sigma: 2

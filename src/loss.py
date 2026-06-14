@@ -26,23 +26,33 @@ class DataLoss(nn.Module):
         min_target = dist.amin(dim=0) # min x for a fixed target
 
         # Geman-McClure Penalty
-        pow_2 = min_target.pow(2)
-        p = pow_2 / (self.sigma + pow_2)
-        return p.sum()
+        pow_2_min_target = min_target.pow(2)
+        p_target = pow_2_min_target / (self.sigma + pow_2_min_target)
+
+        pow_2_min_x = min_x.pow(2)
+        p_x = pow_2_min_x / (self.sigma + pow_2_min_x)
+        return p_target.sum() + p_x.sum()
     
-class PriorLoss(nn.Module):
-    def __init__(self, means, covs):
+class PosePriorLoss(nn.Module):
+    def __init__(self, means, covs, weights):
         """
         Prior loss towards the pose according to ClothCap paper.
         However, this prior is instead a GMM, with only 69-dimensional
         pose means.
         """
-        super(PriorLoss, self).__init__()
+        super(PosePriorLoss, self).__init__()
 
         self.means = means
         self.covs = covs
-        self.inv_covs = self.covs.inverse()
+        self.weights = weights
 
+        # Pooling
+        self.pose_mean = means.mean(0)
+        self.pose_cov = (self.weights[:, None, None] * self.covs).sum(0) + ((self.means - self.pose_mean).transpose(0, 1) @ (self.weights[:, None] * (self.means - self.pose_mean)))
+        
+        self.inv_covs = self.covs.inverse()
+        self.inv_pose_cov = self.pose_cov.inverse()
+        self.inv_pose_cov = (self.inv_pose_cov + self.inv_pose_cov.T) / 2
 
     def forward(self, x):
         """
@@ -52,12 +62,33 @@ class PriorLoss(nn.Module):
         Parameters:
             x: Tensor of shape (69, )
         """
-        diff = x - self.means # (N, 69)
-        m_dist = ((diff[:, None, :]) @ self.inv_covs).squeeze() # (N, 1, 69)
-        m_dist = m_dist @ diff.transpose(0, 1) # (N, N)
-        return torch.amin(m_dist.diagonal(), axis=0)
+        # Individual means
+        # diff = x - self.means # (N, 69)
+        # m_dist = ((diff[:, None, :]) @ self.inv_covs).squeeze() # (N, 1, 69)
+        # m_dist = m_dist @ diff.transpose(0, 1) # (N, N)
+        # return torch.amin(m_dist.diagonal(), axis=0)
 
+        # Merged mean
+        diff = x - self.pose_mean
+        m_dist = torch.linalg.solve(self.pose_cov, diff)
+        return diff @ m_dist
 
+class ShapePriorLoss(nn.Module):
+    def __init__(self):
+        """
+        Prior loss towards the pose according to ClothCap paper.
+        However, this prior is instead a GMM, with only 69-dimensional
+        pose means.
+        """
+        super(ShapePriorLoss, self).__init__()
+
+    def forward(self, x):
+        """
+        Parameters:
+            x: Tensor of shape (69, )
+        """
+        return torch.norm(x, p=2).pow(2)
+    
 # class NormalConsistency(nn.Module):
 #     def __init__(self):
 #         super(NormalConsistency, self).__init__()
