@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 # Function to print usage guidelines
 print_help() {
     echo "Usage: $0 <INPUT> <HUMAN3D_CHECKPOINT>"

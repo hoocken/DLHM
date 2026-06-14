@@ -71,7 +71,7 @@ class Registration(nn.Module):
         self.data_loss = DataLoss(config.sigma)
         self.pose_prior_loss = PosePriorLoss(self.means, self.covs, self.weights)
         self.shape_prior_loss = ShapePriorLoss()
-        # self.normal_loss = NormalConsistency()
+
         self.optimizer = Adam(nn.ParameterList([self.trans, self.pose, self.betas]), lr=config.lr)
         self.scheduler = StepLR(self.optimizer, step_size=config.step_size, gamma=config.decay)
 
@@ -85,7 +85,6 @@ class Registration(nn.Module):
         self.trans = nn.Parameter(torch.zeros(3, dtype=torch.float32))
         self.pose = nn.Parameter(torch.hstack([torch.zeros(3, dtype=torch.float32), initial_pose]))
         self.betas = nn.Parameter(torch.zeros(self.smpl.beta_shape, dtype=torch.float32))
-        self.angles = nn.Parameter(torch.zeros(3))
 
     def _prepare_point_cloud(self, segmentations: str):
         with open(segmentations, 'rb') as f:
@@ -165,7 +164,7 @@ class Registration(nn.Module):
         pbar = tqdm(total=self.init_epoch, initial=0, ncols=0, desc="Initializing")
         total_loss = -1
         for i in range(self.init_epoch):
-            model = self.smpl(self.trans, self.pose, torch.zeros_like(self.betas), self.angles)
+            model = self.smpl(self.trans, self.pose, torch.zeros_like(self.betas))
             # Calculate model centroids
             model_centroids = self._calculate_model_centroids(model)
         
@@ -191,7 +190,7 @@ class Registration(nn.Module):
         total_loss = -1
 
         for i in range(start, self.epoch):
-            model = self.smpl(self.trans, self.pose, self.betas, self.angles)
+            model = self.smpl(self.trans, self.pose, self.betas)
         
             # Chamfer distance
             data = self.data_loss(model, self.point_cloud)
@@ -215,4 +214,4 @@ class Registration(nn.Module):
         return total_loss
 
     def save_smpl(self):
-        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas, self.angles), fname=self.output_dir / 'smpl_fit.obj')
+        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / 'smpl_fit.obj')

@@ -16,7 +16,7 @@ class SMPL(nn.Module):
 
         _, self.joint_indices = torch.max(self.data['weights'], dim=1)
 
-    def forward(self, trans, pose, betas, angles):
+    def forward(self, trans, pose, betas):
         """
         Takes trans, pose, and betas to return vertices
         """
@@ -54,46 +54,7 @@ class SMPL(nn.Module):
         rest_shape_h = torch.cat((v_posed, torch.ones(([v_posed.shape[0], 1]), dtype=torch.float32, device=self.device)), dim = 1)
         v = (T @  rest_shape_h.reshape([-1, 4, 1])).reshape([-1, 4])[:, :3]
 
-        angle_x, angle_y, angle_z = angles[0], angles[1], angles[2]
-        rad_x = torch.deg2rad(angle_x)
-        rad_y = torch.deg2rad(angle_y)
-        rad_z = torch.deg2rad(angle_z)
-
-        # --- 2. Construct 3x3 Rotation Matrices for each axis ---
-        # Rotation around X-axis
-        cos_x, sin_x = torch.cos(rad_x), torch.sin(rad_x)
-        R_x = torch.tensor([
-            [1.0,   0.0,    0.0],
-            [0.0, cos_x, -sin_x],
-            [0.0, sin_x,  cos_x]
-        ])
-
-        # Rotation around Y-axis
-        cos_y, sin_y = torch.cos(rad_y), torch.sin(rad_y)
-        R_y = torch.tensor([
-            [ cos_y, 0.0, sin_y],
-            [   0.0, 1.0,   0.0],
-            [-sin_y, 0.0, cos_y]
-        ])
-
-        # Rotation around Z-axis
-        cos_z, sin_z = torch.cos(rad_z), torch.sin(rad_z)
-        R_z = torch.tensor([
-            [cos_z, -sin_z, 0.0],
-            [sin_z,  cos_z, 0.0],
-            [  0.0,    0.0, 1.0]
-        ])
-
-        # --- 3. Combine into a single Rotation Matrix ---
-        # Order matters! This applies X, then Y, then Z (Intrinsic rotation)
-        R_combined = R_z @ R_y @ R_x
-
-        # Move matrix to the same device and type as your vertices (e.g., GPU/Float32)
-        # Assuming 'vertices' has shape (N, 3) or (B, N, 3)
-        R_combined = R_combined.to(device=v.device, dtype=v.dtype)
-
-
-        vertices = v @ R_combined.T + trans.reshape([1, 3])
+        vertices = v + trans.reshape([1, 3])
 
         return vertices
 
