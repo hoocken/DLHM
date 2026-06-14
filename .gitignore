@@ -10,5 +10,8 @@ wheels/
 .venv
 
 outputs/
-data/
+data/input/
+data/models/
 *.obj
+
+results/

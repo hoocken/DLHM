@@ -1,5 +1,5 @@
 segfit:
-  data_path: "/home/anthony/Projects/DLHM/data/input"
+  data_path: "/home/anthony/Projects/DLHM/data/input/"
   is_input_z_up: False
 
 general:

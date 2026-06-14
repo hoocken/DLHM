@@ -1,60 +1,90 @@
-import pickle
+import os
+import argparse
+import subprocess
+import shutil
+from pathlib import Path
 
-import hydra
-import numpy as np
-import torch
 
-from src import Registration
+def run_command(command, use_shell=False, env=None):
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        shell=use_shell,
+        env=env,
+        bufsize=1 
+    )
+    try:
+        for line in process.stdout:
+            print(line, end="")
+        for error in process.stderr:
+            print(error, end="")
+    except KeyboardInterrupt:
+        process.terminate()
+        print("Process terminated.")
+    return process.wait()
 
-def argsort(seq):
-    return sorted(range(len(seq)), key=seq.__getitem__)
-
-@hydra.main(version_base=None, config_name='config', config_path='config')
-def main(config):
-    with open(config.model.prior, 'rb') as f:
-        gmm = pickle.load(f, encoding='latin1')
-        
-
-    means = torch.from_numpy(gmm['means'].astype(np.float32))
-    covs = torch.from_numpy(gmm['covars'].astype(np.float32))
-    weights = torch.from_numpy(gmm['weights'].astype(np.float32))
-
-    mean_shape = means.mean(0)
-    losses = []
-    N = means.shape[0]
-    optimizers = [Registration(config.model, mean_shape, means, covs, weights) for count in range(0, 1)]
-    indices = list(range(N))
-    epoch_scaling = 3
-    # min_loss = -1
-    # min_optimizer = None
-    # min_count = -1
-    start = 0
-    while True:
-        for count in range(len(optimizers)):
-            print(f"Fitting initial pose #{indices[count] + 1}:")
-            optimizer = optimizers[count]
-            loss = optimizer.fit(start)
-            optimizer.epoch *= epoch_scaling
-
-            print(f"Final loss of pose #{indices[count] + 1}: {loss}")
-                
-            losses.append(loss)
-            indices.append(count)
-
-        if N == 1:
-            print("Found best model!")
-            break
-
-        start = optimizer.epoch // epoch_scaling
-        print(f"\nTaking the {N // 2} best models")
-        args = argsort(losses)
-        optimizers = [optimizers[i] for i in args[:N//2]]
-        indices = [indices[i] for i in args[:N//2]]
-        losses = []
-        N = len(optimizers)
-
-    print(f"Saving SMPL model of minimum loss!")
-    optimizers[0].save_smpl()
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    # parser.add_argument("--input_path", type=str, required=True)
+    parser.add_argument("--human3d_ckpt", type=str, required=True)
+    parser.add_argument("--is_input_z_up", type=str, required=False, default="False")
+    # parser.add_argument("--smplx_gt_dir", type=str, required=False, default=None)
+    parser.add_argument('--is_hi4d', action='store_true')
+    args = parser.parse_args()
+
+    human3d_ckpt = (
+        args.human3d_ckpt)
+    is_input_z_up = args.is_input_z_up.lower() == "true"
+
+    if not os.path.exists("results"):
+        os.makedirs("results")
+
+    # paths to python binaries
+    human3d_env_python = os.path.join(Path.home(), "miniconda/envs/human3d_cuda113/bin/python")
+    # pytorch3d_env_python = os.path.join(Path.home(), "miniconda3/envs/pytorch3d/bin/python")
+
+    # get segmentation from hi4d
+    run_command([
+        human3d_env_python,
+        'lib/human3d/infer_mhbps.py',
+        f'general.checkpoint={args.human3d_ckpt}',
+    ], env={**os.environ, "PYTHONUNBUFFERED": "1"})
+    shutil.rmtree("saved")
+
+    # prepare for model fitting
+    # if not args.is_hi4d:
+    #     run_command([
+    #         pytorch3d_env_python,
+    #         'src/prepare_smplx_gts.py',
+    #         '--smplx_gt_dir',
+    #         args.smplx_gt_dir,
+    #         '--is_input_z_up',
+    #         args.is_input_z_up
+    #     ], env={**os.environ, "PYTHONUNBUFFERED": "1"})
+    # else:
+    #     run_command([
+    #         pytorch3d_env_python,
+    #         'src/prepare_smplx_gts.py',
+    #         '--smplx_gt_dir',
+    #         args.smplx_gt_dir,
+    #         '--is_input_z_up',
+    #         args.is_input_z_up,
+    #         '--is_hi4d'
+    #     ], env={**os.environ, "PYTHONUNBUFFERED": "1"})
+
+    # # run model fitting
+    # if not args.is_hi4d:
+    #     run_command([
+    #         pytorch3d_env_python,
+    #         'src/main.py',
+    #     ], env={**os.environ, "PYTHONUNBUFFERED": "1"})
+    # else:
+    #     run_command([
+    #         pytorch3d_env_python,
+    #         'src/main.py',
+    #         '--is_hi4d'
+    #     ], env={**os.environ, "PYTHONUNBUFFERED": "1"})
+    # main()
