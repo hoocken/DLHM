@@ -61,7 +61,7 @@ If you just want to run the fitting on a segmentation result, run
 uv run fit.py
 ```
 
-Your fitted model will be available in `outputs/<date>/<time>/`. The segmentation results is viewable in `results/human3d_segs`.
+Your fitted model will be available in `outputs/<date>/<time>/`. The segmentation results is viewable in `outputs/human3d_segs`.
 
 ## Libraries
 ### SMPL

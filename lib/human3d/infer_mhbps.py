@@ -198,17 +198,17 @@ def test(cfg: DictConfig):
     # viz.save("visus/" + scene_name)
     # pdb.set_trace()
 
-    o3d.io.write_point_cloud(f'results/human3d_segs/{scene_name}.ply', pcd)
+    o3d.io.write_point_cloud(f'outputs/human3d_segs/{scene_name}.ply', pcd)
     result = {"body_semseg" : pred_parts, "instance_seg" : pred_inst, "points" : np.asarray(pcd.points), "colors" : np.asarray(pcd.colors)}
     # full_results[scene_name] = result
-    with open("results/human3d_segs/segmentation.pkl", "wb") as f:
+    with open("outputs/human3d_segs/segmentation.pkl", "wb") as f:
         pickle.dump(result, f)
     
     
 @hydra.main(config_path="conf", config_name="config_base_instance_segmentation_demo.yaml")
 def main(cfg: DictConfig):
-    if not os.path.exists("../../../../results/human3d_segs"):
-        os.makedirs("../../../../results/human3d_segs")
+    if not os.path.exists("../../../../outputs/human3d_segs"):
+        os.makedirs("../../../../outputs/human3d_segs")
     test(cfg)
     """Run with:
     python infer_mhbps.py general.checkpoint='pretrained/FSK.ckpt'

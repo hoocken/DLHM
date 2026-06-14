@@ -18,7 +18,7 @@ def main(config):
     weights = torch.from_numpy(gmm['weights'].astype(np.float32))
 
     mean_shape = means.mean(0)
-    seg_result = Path(os.getcwd()) / 'results/human3d_segs/segmentation.pkl'
+    seg_result = Path(os.getcwd()) / 'outputs/human3d_segs/segmentation.pkl'
     optimizer = Registration(config.model, mean_shape, means, covs, weights, seg_result)
     
     print(f"Start fitting:")

@@ -14,4 +14,4 @@ data/input/
 data/models/
 *.obj
 
-results/
+outputs/
