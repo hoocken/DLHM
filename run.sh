@@ -27,7 +27,7 @@ fi
 # Run Human3D segmentation
 HUMAN3D="$HOME/miniconda/envs/human3d_cuda113/bin/python"
 echo "---------------------------------------------------"
-echo "|                  SEGMENTATION                    |"
+echo "|                  SEGMENTATION                   |"
 echo "---------------------------------------------------"
 $HUMAN3D lib/human3d/infer_mhbps.py segfit.data_path=$1 general.checkpoint=$2
 

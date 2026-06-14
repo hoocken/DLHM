@@ -50,9 +50,15 @@ to install all required libraries.
 You can download the SMPL model from https://smpl.is.tue.mpg.de/.
 
 ## Usage
-To run the fitting, put your input in `data/input/` and the SMPL models in `data/models/`. Then run
+To run the fitting, put your input in `data/input/` and the SMPL models in `data/models/`. Afterwards, set the path
+to the SMPL model in `config/config.yaml`. Then run
 ```sh
 bash run.sh data/input/<input_file>.ply data/ckpts/human3d.ckpt
+```
+
+If you just want to run the fitting on a segmentation result, run
+```sh
+uv run fit.py
 ```
 
 ## Libraries

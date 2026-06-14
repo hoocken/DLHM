@@ -77,8 +77,6 @@ class Registration(nn.Module):
 
         self.step_size = config.step_size
         self.lambda_prior = config.lambda_prior.weight
-        self.lambda_prior_decay = config.lambda_prior.weight_decay
-        self.lambda_prior_decay_step = config.lambda_prior.decay_step
 
         self.init_epoch = config.init_epoch
         self.epoch = config.epoch
@@ -87,6 +85,7 @@ class Registration(nn.Module):
         self.trans = nn.Parameter(torch.zeros(3, dtype=torch.float32))
         self.pose = nn.Parameter(torch.hstack([torch.zeros(3, dtype=torch.float32), initial_pose]))
         self.betas = nn.Parameter(torch.zeros(self.smpl.beta_shape, dtype=torch.float32))
+        self.angles = nn.Parameter(torch.zeros(3))
 
     def _prepare_point_cloud(self, segmentations: str):
         with open(segmentations, 'rb') as f:
@@ -162,14 +161,11 @@ class Registration(nn.Module):
         
         return new_mapping
     
-    def decay_weight(self, decay, weight, epoch, decay_every):
-        return (decay ** (epoch // decay_every)) * weight
-    
     def initialize_pose(self):
         pbar = tqdm(total=self.init_epoch, initial=0, ncols=0, desc="Initializing")
         total_loss = -1
         for i in range(self.init_epoch):
-            model = self.smpl(self.trans, self.pose, torch.zeros_like(self.betas))
+            model = self.smpl(self.trans, self.pose, torch.zeros_like(self.betas), self.angles)
             # Calculate model centroids
             model_centroids = self._calculate_model_centroids(model)
         
@@ -195,7 +191,7 @@ class Registration(nn.Module):
         total_loss = -1
 
         for i in range(start, self.epoch):
-            model = self.smpl(self.trans, self.pose, self.betas)
+            model = self.smpl(self.trans, self.pose, self.betas, self.angles)
         
             # Chamfer distance
             data = self.data_loss(model, self.point_cloud)
@@ -203,8 +199,7 @@ class Registration(nn.Module):
             shape_prior = self.shape_prior_loss(self.betas)
             
             # Combined loss
-            lambda_pose_prior = self.decay_weight(self.lambda_prior_decay, self.lambda_prior, i, self.lambda_prior_decay_step)
-            total_loss = data
+            total_loss = data + self.lambda_prior * pose_prior +  self.lambda_prior * shape_prior
             # total_loss = data
             
             self.optimizer.zero_grad()
@@ -220,27 +215,4 @@ class Registration(nn.Module):
         return total_loss
 
     def save_smpl(self):
-        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / 'smpl_fit.obj')
-
-    # def compute_mesh_normals(self, vertices):
-    #     """Compute vertex normals from SMPL mesh"""
-    #     faces = self.smpl.data['f'].to(torch.int32)  # Triangle faces
-        
-    #     # Get vertices of each face
-    #     v0 = vertices[faces[:, 0]]
-    #     v1 = vertices[faces[:, 1]]
-    #     v2 = vertices[faces[:, 2]]
-        
-    #     # Compute face normals via cross product
-    #     face_normals = torch.cross(v1 - v0, v2 - v0, dim=1)
-    #     face_normals = face_normals / (torch.norm(face_normals, dim=1, keepdim=True) + 1e-8)
-        
-    #     # Average normals per vertex
-    #     vertex_normals = torch.zeros_like(vertices)
-    #     for i in range(len(faces)):
-    #         vertex_normals[faces[i, 0]] += face_normals[i]
-    #         vertex_normals[faces[i, 1]] += face_normals[i]
-    #         vertex_normals[faces[i, 2]] += face_normals[i]
-        
-    #     vertex_normals = vertex_normals / (torch.norm(vertex_normals, dim=1, keepdim=True) + 1e-8)
-    #     return vertex_normals
+        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas, self.angles), fname=self.output_dir / 'smpl_fit.obj')

@@ -1,15 +1,13 @@
 model:
-  base_model: data/models/basicModel_f_lbs_10_207_0_v1.0.0.pkl
+  base_model: data/models/basicmodel_m_lbs_10_207_0_v1.0.0.pkl
   prior: data/prior/gmm_08.pkl
-  init_epoch: 50
+  init_epoch: 100
   epoch: 500
-  step_size: 300
+  step_size: 400
   decay: 0.2
   lr: 0.04
   voxel_size: 0.015
   lambda_normal: 0.1
   lambda_prior:
-    weight: 0.5
-    weight_decay: 0.1
-    decay_step: 200
+    weight: 0.0001
   sigma: 2

@@ -63,15 +63,18 @@ class PosePriorLoss(nn.Module):
             x: Tensor of shape (69, )
         """
         # Individual means
-        # diff = x - self.means # (N, 69)
-        # m_dist = ((diff[:, None, :]) @ self.inv_covs).squeeze() # (N, 1, 69)
-        # m_dist = m_dist @ diff.transpose(0, 1) # (N, N)
-        # return torch.amin(m_dist.diagonal(), axis=0)
+        diff = x - self.means # (N, 69)
+        m_dist = ((diff[:, None, :]) @ self.inv_covs).squeeze() # (N, 1, 69)
+        m_dist = m_dist @ diff.transpose(0, 1) # (N, N)
+        return torch.amin(m_dist.diagonal(), axis=0)
 
         # Merged mean
-        diff = x - self.pose_mean
-        m_dist = torch.linalg.solve(self.pose_cov, diff)
-        return diff @ m_dist
+        # diff = x - self.pose_mean
+        # print(x)
+        # print(self.pose_mean)
+        # raise Exception
+        # m_dist = torch.linalg.solve(self.pose_cov, diff)
+        # return diff @ m_dist
 
 class ShapePriorLoss(nn.Module):
     def __init__(self):

@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 import pickle
 
 import hydra
@@ -6,57 +8,25 @@ import torch
 
 from src.model import Registration
 
-def argsort(seq):
-    return sorted(range(len(seq)), key=seq.__getitem__)
-
 @hydra.main(version_base=None, config_name='config', config_path='config')
 def main(config):
     with open(config.model.prior, 'rb') as f:
         gmm = pickle.load(f, encoding='latin1')
         
-
     means = torch.from_numpy(gmm['means'].astype(np.float32))
     covs = torch.from_numpy(gmm['covars'].astype(np.float32))
     weights = torch.from_numpy(gmm['weights'].astype(np.float32))
 
     mean_shape = means.mean(0)
-    losses = []
-    N = 1
-    seg_result = '/home/anthony/Projects/DLHM/results/human3d_segs/segmentation.pkl'
-    optimizers = [Registration(config.model, mean_shape, means, covs, weights, seg_result) for count in range(0, 1)]
-    indices = list(range(N))
+    seg_result = Path(os.getcwd()) / 'results/human3d_segs/segmentation.pkl'
+    optimizer = Registration(config.model, mean_shape, means, covs, weights, seg_result)
     
-    epoch_scaling = 2
-    # min_loss = -1
-    # min_optimizer = None
-    # min_count = -1
-    start = 0
-    while True:
-        for count in range(len(optimizers)):
-            print(f"Fitting initial pose #{indices[count] + 1}:")
-            optimizer = optimizers[count]
-            loss = optimizer.fit(start)
-            optimizer.epoch *= epoch_scaling
+    print(f"Start fitting:")
+    loss = optimizer.fit()
 
-            print(f"Final loss of pose #{indices[count] + 1}: {loss}")
-                
-            losses.append(loss)
-            indices.append(count)
-
-        if N == 1:
-            print("Found best model!")
-            break
-
-        start = optimizer.epoch // epoch_scaling
-        print(f"\nTaking the {N // 2} best models")
-        args = argsort(losses)
-        optimizers = [optimizers[i] for i in args[:N//2]]
-        indices = [indices[i] for i in args[:N//2]]
-        losses = []
-        N = len(optimizers)
-
-    print(f"Saving SMPL model of minimum loss!")
-    optimizers[0].save_smpl()
+    print(f"Final loss: {loss}")
+    print(f"Saving SMPL model!")
+    optimizer.save_smpl()
 
 if __name__ == "__main__":
     main()
