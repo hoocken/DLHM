@@ -158,51 +158,51 @@ def test(cfg: DictConfig):
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     full_results = {}
 
-    scenes_base_path = cfg.segfit.data_path
-    fnames = sorted(os.listdir(scenes_base_path))
-    for fname in tqdm(fnames, file=sys.stdout):
-        if not fname.endswith(".ply"):
-            continue
-        filepath = scenes_base_path + fname
+    filepath = cfg.segfit.data_path
+    # fnames = sorted(os.listdir(scenes_base_path))
+    if not filepath.endswith(".ply"):
+        raise Exception("Input needs to be a .ply!")
+    
+    # filepath = scenes_base_path + fname
 
-        # because hydra wants to change dir for some reason
-        os.chdir(hydra.utils.get_original_cwd())
-        cfg, model, loggers = get_parameters(cfg)
-        model.to(device)
-        model.eval()
+    # because hydra wants to change dir for some reason
+    os.chdir(hydra.utils.get_original_cwd())
+    cfg, model, loggers = get_parameters(cfg)
+    model.to(device)
+    model.eval()
 
-        c_fn = hydra.utils.instantiate(model.config.data.test_collation)
+    c_fn = hydra.utils.instantiate(model.config.data.test_collation)
 
 
-        # Example scenes
-        scene_name = filepath.split("/")[-1].replace('.ply', "")
-        # is_input_z_up = True #: z-up, False: y-up
+    # Example scenes
+    scene_name = filepath.split("/")[-1].replace('.ply', "")
+    # is_input_z_up = True #: z-up, False: y-up
 
-        # process new input
-        input_batch, full_coords = process_file(filepath, scene_name=scene_name, is_input_z_up=cfg.segfit.is_input_z_up, verbose=False)
-        batch = c_fn(input_batch)
-        with torch.no_grad():
-            (pred_inst, pred_parts) = model.eval_step_demo(batch)[:2]
+    # process new input
+    input_batch, full_coords = process_file(filepath, scene_name=scene_name, is_input_z_up=cfg.segfit.is_input_z_up, verbose=False)
+    batch = c_fn(input_batch)
+    with torch.no_grad():
+        (pred_inst, pred_parts) = model.eval_step_demo(batch)[:2]
 
-        # # save predictions for debugging
-        # inst_colors = (np.asarray(map2color_instances(pred_inst)).T)/255.
-        part_colors = (np.asarray(map2color_parts(pred_parts)).T)/255.
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(full_coords)
-        pcd.estimate_normals()
-        pcd.colors = o3d.utility.Vector3dVector(part_colors)
-        print("Number of detected human points:", sum(pred_parts != 0))
+    # # save predictions for debugging
+    # inst_colors = (np.asarray(map2color_instances(pred_inst)).T)/255.
+    part_colors = (np.asarray(map2color_parts(pred_parts)).T)/255.
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(full_coords)
+    pcd.estimate_normals()
+    pcd.colors = o3d.utility.Vector3dVector(part_colors)
+    print("Number of detected human points:", sum(pred_parts != 0))
 
-        # viz = visualizer.Visualizer()
-        # viz.add_points("Point Cloud", full_coords, 255 * part_colors, point_size=5)
-        # viz.save("visus/" + scene_name)
-        # pdb.set_trace()
+    # viz = visualizer.Visualizer()
+    # viz.add_points("Point Cloud", full_coords, 255 * part_colors, point_size=5)
+    # viz.save("visus/" + scene_name)
+    # pdb.set_trace()
 
-        o3d.io.write_point_cloud(f'results/human3d_segs/{scene_name}.ply', pcd)
-        result = {"body_semseg" : pred_parts, "instance_seg" : pred_inst, "points" : np.asarray(pcd.points), "colors" : np.asarray(pcd.colors)}
-        full_results[scene_name] = result
+    o3d.io.write_point_cloud(f'results/human3d_segs/{scene_name}.ply', pcd)
+    result = {"body_semseg" : pred_parts, "instance_seg" : pred_inst, "points" : np.asarray(pcd.points), "colors" : np.asarray(pcd.colors)}
+    # full_results[scene_name] = result
     with open("results/human3d_segs/segmentation.pkl", "wb") as f:
-        pickle.dump(full_results, f)
+        pickle.dump(result, f)
     
     
 @hydra.main(config_path="conf", config_name="config_base_instance_segmentation_demo.yaml")

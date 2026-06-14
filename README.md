@@ -46,10 +46,13 @@ uv sync
 ```
 to install all required libraries.
 
+### SMPL Model
+You can download the SMPL model from https://smpl.is.tue.mpg.de/.
+
 ## Usage
-To run the fitting, put your input in `data/input/`, the SMPL models in `data/models/`, and the prior into `data/prior/`. Then run
+To run the fitting, put your input in `data/input/` and the SMPL models in `data/models/`. Then run
 ```sh
-uv run main.py --human3d_ckpt ckpts/human3d.ckpt
+bash run.sh data/input/<input_file>.ply data/ckpts/human3d.ckpt
 ```
 
 ## Libraries

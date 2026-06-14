@@ -21,10 +21,12 @@ def main(config):
 
     mean_shape = means.mean(0)
     losses = []
-    N = means.shape[0]
-    optimizers = [Registration(config.model, mean_shape, means, covs, weights) for count in range(0, 1)]
+    N = 1
+    seg_result = '/home/anthony/Projects/DLHM/results/human3d_segs/segmentation.pkl'
+    optimizers = [Registration(config.model, mean_shape, means, covs, weights, seg_result) for count in range(0, 1)]
     indices = list(range(N))
-    epoch_scaling = 3
+    
+    epoch_scaling = 2
     # min_loss = -1
     # min_optimizer = None
     # min_count = -1
