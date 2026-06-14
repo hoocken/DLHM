@@ -14,6 +14,8 @@ class SMPL(nn.Module):
         self.data = self.SMPL_Loader.data
         self.parent = self.SMPL_Loader.parent
 
+        _, self.joint_indices = torch.max(self.data['weights'], dim=1)
+
     def forward(self, trans, pose, betas):
         """
         Takes trans, pose, and betas to return vertices
