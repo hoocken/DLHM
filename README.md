@@ -61,6 +61,8 @@ If you just want to run the fitting on a segmentation result, run
 uv run fit.py
 ```
 
+Your fitted model will be available in `outputs/<date>/<time>/`. The segmentation results is viewable in `results/human3d_segs`.
+
 ## Libraries
 ### SMPL
 Base SMPL code for PyTorch in Python 3.11 is taken from https://github.com/Pokerlishao/SMPL-py311 with modifications. 
