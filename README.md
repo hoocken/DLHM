@@ -40,7 +40,9 @@ pip3 install numpy==1.26.0
 You may need to fix some dependency issues that arises. If you have problems regarding MinkowskiEngine compilation, downgrade gcc and g++ to version 9 and export the compiler flags as an environment variable.
 
 ### Fitting
-Afterwards, run
+This repository uses [uv](https://docs.astral.sh/uv/) as a package manager. See their website for details on installation.
+
+After installing uv, run
 ```sh
 uv sync
 ```
