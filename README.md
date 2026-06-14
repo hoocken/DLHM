@@ -13,7 +13,7 @@ cd Human3D
 
 export TORCH_CUDA_ARCH_LIST="6.0 6.1 6.2 7.0 7.2 7.5 8.0 8.6"
 
-conda env create -f environment.yaml
+conda env create -f environment.yaml # here you may need to update some package versions
 
 conda activate human3d_cuda113
 
@@ -27,17 +27,20 @@ cd third_party
 git clone --recursive "https://github.com/NVIDIA/MinkowskiEngine"
 cd MinkowskiEngine
 git checkout 02fc608bea4c0549b0a7b00ca1bf15dee4a0b228
-python setup.py install --force_cuda --blas=openblas --no-build-isolation
 
-cd ../../pointnet2
+# Uncomment this line if you want to set max jobs:
+# export MAX_JOBS=3
+python setup.py install --force_cuda --blas=openblas
+
+cd ../pointnet2
 python setup.py install
 
 cd ../../
-pip3 install pytorch-lightning==1.7.2 pytorch==1.12
+pip3 install pytorch-lightning==1.7.2 --no-deps
 pip3 install numpy==1.26.0
 ```
 
-You may need to fix some dependency issues that arises. If you have problems regarding MinkowskiEngine compilation, downgrade gcc and g++ to version 9 and export the compiler flags as an environment variable.
+You may need to fix some dependency issues that arises. If you have problems regarding MinkowskiEngine compilation, downgrade gcc and g++ to version 9 and export the compiler version as an environment variable.
 
 ### Fitting
 This repository uses [uv](https://docs.astral.sh/uv/) as a package manager. See their website for details on installation.

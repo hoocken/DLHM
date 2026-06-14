@@ -24,11 +24,27 @@ if [ "$#" -lt 2 ]; then
 fi
 
 # Run Human3D segmentation
-HUMAN3D="$HOME/miniconda/envs/human3d_cuda113/bin/python"
+CONDA_PROFILE_PATH="$HOME/miniconda/etc/profile.d/conda.sh"
+ENV_NAME="human3d_cuda113"
+
+# Initialize Conda for non-interactive shells
+if [ -f "$CONDA_PROFILE_PATH" ]; then
+    source "$CONDA_PROFILE_PATH"
+else
+    echo "Error: Conda profile script not found at $CONDA_PROFILE_PATH"
+    exit 1
+fi
+
+echo "$ENV_NAME"
+# Activate the environment
+conda activate "$ENV_NAME"
+
 echo "---------------------------------------------------"
 echo "|                  SEGMENTATION                   |"
 echo "---------------------------------------------------"
-$HUMAN3D lib/human3d/infer_mhbps.py segfit.data_path=$1 general.checkpoint=$2
+python lib/human3d/infer_mhbps.py segfit.data_path=$1 general.checkpoint=$2
+
+conda deactivate
 
 # Remove saved folder
 rm -rf saved
