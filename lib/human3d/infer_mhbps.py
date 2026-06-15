@@ -207,8 +207,8 @@ def test(cfg: DictConfig):
     
 @hydra.main(config_path="conf", config_name="config_base_instance_segmentation_demo.yaml")
 def main(cfg: DictConfig):
-    if not os.path.exists("../../../../outputs/human3d_segs"):
-        os.makedirs("../../../../outputs/human3d_segs")
+    if not os.path.exists("outputs/human3d_segs"):
+        os.makedirs("outputs/human3d_segs")
     test(cfg)
     """Run with:
     python infer_mhbps.py general.checkpoint='pretrained/FSK.ckpt'

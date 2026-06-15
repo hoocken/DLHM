@@ -215,3 +215,6 @@ class Registration(nn.Module):
 
     def save_smpl(self):
         self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / 'smpl_fit.obj')
+        result = {"trans" : self.trans.detach().cpu(), "pose" : self.pose.detach().cpu(), "betas" : self.betas.detach().cpu()}
+        with open('outputs/fit/smpl_fit_params.pkl', "wb") as f:
+            pickle.dump(result, f)
