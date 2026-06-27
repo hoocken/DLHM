@@ -12,7 +12,7 @@ from lib.HIT.hit.utils.model import HitLoader
 from lib.SMPL import SMPL
 import open3d as o3d
 
-@hydra.main(version_base=None, config_name='config', config_path='../config')
+@hydra.main(version_base=None, config_name='config', config_path='../../config')
 def main(config):
     pose_config = config.pose
     bdata = np.load(pose_config.data)

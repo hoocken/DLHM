@@ -69,7 +69,7 @@ echo "---------------------------------------------------"
 
 # Run fitting
 conda activate "$HIT_ENV_NAME"
-python fit/fit.py model.gender=$2
+python src/fit/fit.py model.gender=$2
 
 echo "---------------------------------------------------"
 echo "|                      HIT                        |"
@@ -83,6 +83,6 @@ echo "|                     MOTION                      |"
 echo "---------------------------------------------------"
 
 # Pose HIT
-python pose_extraction/pose_hit.py pose.data=$3
+python src/pose_extraction/pose_hit.py pose.data=$3
 
 conda deactivate
