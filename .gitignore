@@ -12,6 +12,5 @@ wheels/
 outputs/
 data/input/
 data/models/
+data/target/
 *.obj
-
-outputs/
