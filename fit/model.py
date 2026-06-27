@@ -58,7 +58,7 @@ class Registration(nn.Module):
         self.smpl = SMPL(self.path, self.device)
         self.voxel_size = config.voxel_size
         
-        self.point_cloud, self.scan_centroids = self._prepare_point_cloud(seg)
+        self.point_cloud, self.scan_centroids, self.name = self._prepare_point_cloud(seg)
         self.point_cloud = self.point_cloud.to(self.device)
 
         self.means = means.to(self.device)
@@ -76,7 +76,11 @@ class Registration(nn.Module):
         self.scheduler = StepLR(self.optimizer, step_size=config.step_size, gamma=config.decay)
 
         self.step_size = config.step_size
-        self.lambda_prior = config.lambda_prior.weight
+        self.lambda_prior_pose = config.lambda_prior.pose_weight
+        self.lambda_prior_shape = config.lambda_prior.shape_weight
+        self.lambda_decay_strength  = config.lambda_prior.strength
+        self.lambda_decay_patience = config.lambda_prior.patience
+        self.lambda_decay_threshold = config.lambda_prior.threshold
 
         self.init_epoch = config.init_epoch
         self.epoch = config.epoch
@@ -122,11 +126,12 @@ class Registration(nn.Module):
 
         # Downsample
         downsampled = pcd.voxel_down_sample(self.voxel_size)
-
-        o3d.io.write_point_cloud(self.output_dir / 'point_cloud.ply', downsampled)
         downsampled_points = torch.from_numpy(np.asarray(downsampled.points)).to(dtype=torch.float32, device=self.device)
         
-        return downsampled_points, torch.tensor(centroids)
+        # Get name
+        name = data['name']
+
+        return downsampled_points, torch.tensor(centroids), name
     
     
     def _calculate_model_centroids(self, model):
@@ -189,6 +194,9 @@ class Registration(nn.Module):
         pbar = tqdm(total=self.epoch, initial=start, ncols=0, desc="Fit")
         total_loss = -1
 
+        min_loss = -1
+        patience = 0
+
         for i in range(start, self.epoch):
             model = self.smpl(self.trans, self.pose, self.betas)
         
@@ -198,7 +206,19 @@ class Registration(nn.Module):
             shape_prior = self.shape_prior_loss(self.betas)
             
             # Combined loss
-            total_loss = data + self.lambda_prior * pose_prior +  self.lambda_prior * shape_prior
+            total_loss = data + self.lambda_prior_pose * pose_prior +  self.lambda_prior_shape * shape_prior
+
+            if min_loss == -1 or total_loss < min_loss - self.lambda_decay_threshold:
+                min_loss = total_loss
+                patience = 0
+            else:
+                patience += 1
+
+            # Lambda decay
+            if patience >= self.lambda_decay_patience:
+                patience = 0
+                self.lambda_prior_pose = self.lambda_prior_pose * self.lambda_decay_strength
+                self.lambda_prior_shape = self.lambda_prior_shape * self.lambda_decay_strength
             # total_loss = data
             
             self.optimizer.zero_grad()
@@ -212,9 +232,29 @@ class Registration(nn.Module):
             pbar.set_postfix(loss=total_loss.item())
 
         return total_loss
+    
+    @torch.no_grad
+    def evaluate(self, target):
+        target_pcd = o3d.io.read_point_cloud(target)
+        target_points = torch.from_numpy(np.asarray(target_pcd.points)).to(self.device)
+        
+        model = self.smpl(self.trans, self.pose, self.betas)
+
+        dist = torch.norm(model - target_points, dim=1)
+        mean_error = dist.mean()
+        return mean_error * 100
 
     def save_smpl(self):
-        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / 'smpl_fit.obj')
-        result = {"trans" : self.trans.detach().cpu(), "pose" : self.pose.detach().cpu(), "betas" : self.betas.detach().cpu()}
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(self.point_cloud.cpu().numpy())
+
+        o3d.io.write_point_cloud(self.output_dir / 'point_cloud.ply', pcd)
+        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / f'smpl_fit_{self.name}.obj')
+        result = {
+            "trans" : torch.zeros_like(self.trans) , # Zero out the translation
+            "pose" : torch.zeros_like(self.pose), # Zero out the pose
+            "betas" : self.betas.detach().cpu()
+        }
+
         with open('outputs/fit/smpl_fit_params.pkl', "wb") as f:
             pickle.dump(result, f)

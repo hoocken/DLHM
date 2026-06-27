@@ -1,29 +1,45 @@
 import pickle
+from typing import Literal
 
 import numpy as np
 import torch
 import torch.nn as nn
 
 class DataLoss(nn.Module):
-    def __init__(self, sigma):
+    def __init__(self, sigma, distance_type: Literal["Symmetric", "Forward", "Reverse"]="Symmetric"):
+        """
+        Calculates the point to surface distance by calculating the distance to the nearest point.
+
+        Parameters:
+            sigma: Sigma for Geman-McClure Penalty
+            distance_type:
+                - Symmetric: returns both p2s distance from mesh to target and vice versa
+                - Forward: returns p2s distance from mesh to target
+                - Reverse: returns p2s distance from target to mesh
+        """
         super(DataLoss, self).__init__()
+        self.distance_type: Literal["Symmetric", "Forward", "Reverse"] = distance_type
         self.sigma = sigma
+
+    def calculate_point_to_surface_distance(self, x, target):
+        temp = x[:, None, :]
+        temp_target = target[None, :, :]
+        dist = torch.norm(temp - temp_target, p=2, dim=-1) # (N, M)
+        min_x = dist.amin(dim=1) # min target for a fixed x; (N)
+        min_target = dist.amin(dim=0) # min x for a fixed target; (M)
+        return min_x, min_target
         
     def forward(self, x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
+        Calculates the point to surface distance by calculating the distance to the nearest point.
         
         Parameters:
             x: Shape of (N, 3)
             target: Shape of (M, 3)
         """
 
-        # Chamfer Distance as Point to Surface distance
-        # A bit sucky but it'll do
-        temp = x[:, None, :]
-        temp_target = target[None, :, :]
-        dist = torch.norm(temp - temp_target, p=2, dim=-1).pow(2) # (N, M)
-        min_x = dist.amin(dim=1) # min target for a fixed x - (N)
-        min_target = dist.amin(dim=0) # min x for a fixed target
+        # Point to Surface distance
+        min_x, min_target = self.calculate_point_to_surface_distance(x, target)
 
         # Geman-McClure Penalty
         pow_2_min_target = min_target.pow(2)
@@ -31,7 +47,14 @@ class DataLoss(nn.Module):
 
         pow_2_min_x = min_x.pow(2)
         p_x = pow_2_min_x / (self.sigma + pow_2_min_x)
-        return p_target.sum() + p_x.sum()
+
+        if self.distance_type == "Symmetric":
+            return p_target.sum() + p_x.sum()
+        elif self.distance_type == "Forward":
+            return p_x.sum()
+        elif self.distance_type == "Reverse":
+            return p_target.sum()
+            
     
 class PosePriorLoss(nn.Module):
     def __init__(self, means, covs, weights):
