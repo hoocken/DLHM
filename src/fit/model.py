@@ -15,8 +15,7 @@ from tqdm import tqdm
 import trimesh
 
 from lib.HIT.hit.model.mysmpl import MySmpl
-from lib.SMPL import SMPL
-from .loss import DataLoss, PosePriorLoss, ShapePriorLoss
+from loss import DataLoss, PosePriorLoss, ShapePriorLoss
 
 smpl_to_body_parts = {
     0: 7, # root -> torso
@@ -52,9 +51,7 @@ class Registration(nn.Module):
         self.config = config 
         self.path = config.base_model
         
-        base_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
-        self.output_dir = base_dir
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir = Path('outputs/fit')
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.smpl = MySmpl(self.path, config.gender).to(self.device)
@@ -257,7 +254,7 @@ class Registration(nn.Module):
         o3d.io.write_point_cloud(self.output_dir / 'point_cloud.ply', pcd)
         output = self.smpl(self.betas, self.trans, self.pose, self.global_orient)
         mesh = trimesh.Trimesh(vertices=output.vertices.squeeze().detach().cpu(), faces=output.faces)
-        mesh.export(self.output_dir / f'smpl_fit_{self.name}.obj')
+        mesh.export(self.output_dir / f'smpl_fit_mesh.obj')
         # self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / f'smpl_fit_{self.name}.obj')
         result = {
             "trans" : torch.zeros_like(self.trans.squeeze().cpu()) , # Zero out the translation
@@ -265,5 +262,5 @@ class Registration(nn.Module):
             "betas" : self.betas.squeeze().detach().cpu()
         }
 
-        with open('outputs/fit/smpl_fit_params.pkl', "wb") as f:
+        with open(self.output_dir / 'smpl_fit_params.pkl', "wb") as f:
             pickle.dump(result, f)

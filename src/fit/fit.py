@@ -6,7 +6,7 @@ import hydra
 import numpy as np
 import torch
 
-from fit.model import Registration
+from model import Registration
 
 @hydra.main(version_base=None, config_name='config', config_path='../../config')
 def main(config):

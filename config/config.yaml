@@ -26,7 +26,7 @@ model:
   sigma: 2
   save_model: True
 
-# hydra:
-#   run:
-#     dir: .
-#   output_subdir: null
+hydra:
+  run:
+    dir: .
+  output_subdir: null
