@@ -1,6 +1,7 @@
 # python infer_mhbps.py general.checkpoint='pretrained/FSK.ckpt'
 
 import os
+from pathlib import Path
 import sys
 import logging
 from hashlib import md5
@@ -199,7 +200,7 @@ def test(cfg: DictConfig):
     # pdb.set_trace()
 
     o3d.io.write_point_cloud(f'outputs/human3d_segs/{scene_name}.ply', pcd)
-    result = {"body_semseg" : pred_parts, "instance_seg" : pred_inst, "points" : np.asarray(pcd.points), "colors" : np.asarray(pcd.colors)}
+    result = {"body_semseg" : pred_parts, "instance_seg" : pred_inst, "points" : np.asarray(pcd.points), "colors" : np.asarray(pcd.colors), "name": scene_name}
     # full_results[scene_name] = result
     with open("outputs/human3d_segs/segmentation.pkl", "wb") as f:
         pickle.dump(result, f)
