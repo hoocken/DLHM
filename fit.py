@@ -6,7 +6,7 @@ import hydra
 import numpy as np
 import torch
 
-from src.model import Registration
+from fit.model import Registration
 
 @hydra.main(version_base=None, config_name='config', config_path='config')
 def main(config):
@@ -25,8 +25,16 @@ def main(config):
     loss = optimizer.fit()
 
     print(f"Final loss: {loss}")
-    print(f"Saving SMPL model!")
-    optimizer.save_smpl()
+
+    # id = optimizer.name.split('_')[-1]
+    # target = Path() / 'data/target' / f'tr_reg_{id}.ply'
+    # v2v = optimizer.evaluate(target)
+
+    # print(f"Final V2V to target mesh: {v2v:.4f}")
+
+    if config.model.save_model:
+        print(f"Saving SMPL model!")
+        optimizer.save_smpl()
 
 if __name__ == "__main__":
     main()
