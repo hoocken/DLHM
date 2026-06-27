@@ -13,11 +13,11 @@ model:
   lr: 0.004
   voxel_size: 0.015
   lambda_prior:
-    pose_weight: 0.01
+    pose_weight: 0.1
     shape_weight: 0.0001
     strength: 0.01
-    patience: 30
-    threshold: 1e-2
+    patience: 20
+    threshold: 1e-1
   sigma: 2
   save_model: True
 
