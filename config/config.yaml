@@ -4,7 +4,8 @@ defaults:
   - override hydra/hydra_logging: disabled
 
 model:
-  base_model: data/models/SMPL_FEMALE.pkl
+  base_model: data/models
+  gender: male
   prior: data/prior/gmm_08.pkl
   init_epoch: 50
   epoch: 800

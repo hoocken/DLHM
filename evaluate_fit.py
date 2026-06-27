@@ -6,11 +6,13 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 import torch
 
+from lib.HIT.hit.model.mysmpl import MySmpl
 from lib.SMPL import SMPL 
 
 import subprocess
 import re
 
+# TODO: Fix migrating SMPL to MySmpl
 def evaluate(points, target):
     target_pcd = o3d.io.read_point_cloud(target)
     target_points = torch.from_numpy(np.asarray(target_pcd.points))
@@ -28,7 +30,7 @@ def check_v2v(model: str, id: int, results: list):
     pose = param_dict['pose']
     betas = param_dict['betas']
 
-    smpl = SMPL(model, 'cpu')
+    smpl = MySmpl(model, 'cpu')
     
     points = smpl(trans, pose, betas)
     target = f'data/target/tr_reg_{id:03d}.ply'
