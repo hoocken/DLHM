@@ -261,7 +261,7 @@ class Registration(nn.Module):
         # self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / f'smpl_fit_{self.name}.obj')
         result = {
             "trans" : torch.zeros_like(self.trans.squeeze().cpu()) , # Zero out the translation
-            "pose" : torch.zeros_like(self.pose.squeeze().cpu()), # Zero out the pose
+            "pose" : torch.zeros(self.pose.shape[1] + self.global_orient.shape[1]), # Zero out the pose
             "betas" : self.betas.squeeze().detach().cpu()
         }
 

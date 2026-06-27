@@ -3,12 +3,15 @@
 import argparse
 import os
 import pickle
+import numpy as np
 import torch
 import trimesh
 
 from hit.utils.model import HitLoader
 from hit.utils.data import load_smpl_data
 import hit.hit_config as cg
+from lib.HIT.hit.model.deformer import skinning
+from lib.HIT.hit.utils.tensors import cond_create
 
 def main():
     
@@ -39,7 +42,7 @@ def main():
     ckpt_choice = args.ckpt_choice
     device = torch.device(args.device)
     
-    out_folder = os.path.join(args.out_folder, f'{exp_name}_{ckpt_choice}')
+    out_folder = os.path.join(args.out_folder, f'hit_best')
     
     # Create a data dictionary containing the SMPL parameters 
     if args.to_infer == 'smpl_template':
@@ -81,7 +84,7 @@ def main():
         
     elif args.output == 'meshes':
         # Extract the mesh 
-        extracted_meshes, _, weights = hl.hit_model.forward_rigged(data['betas'], 
+        _, mesh_ss, weights, _ = hl.hit_model.forward_rigged(data['betas'], 
                                                                 body_pose=data['body_pose'], 
                                                                 global_orient=data['global_orient'], 
                                                                 transl=data['transl'],
@@ -90,18 +93,18 @@ def main():
         # LT : Lean Tissue (muscle and organs, merged with the visceral and intra-muscular fat)
         # AT : Adipose Tissue (subcutaneous fat)
         # BT : Bone Tissue (long bones, we only predict the femur, radius-ulna, tibia and fibula)
-        
+
         smpl_mesh = trimesh.Trimesh(vertices=smpl_output.vertices[0].detach().cpu().numpy(), faces=hl.smpl.faces)
         
-        data_dict = {'smpl_mesh': smpl_mesh.vertices, 'seg_mesh': extracted_meshes, 'weights': weights}
+        data_dict = {'smpl_mesh': smpl_mesh.vertices, 'meshes': mesh_ss, 'weights': weights}
         with open(f'{out_folder}/hit_infer.pkl', 'wb') as f:
             pickle.dump(data_dict, f)
 
         # Save all the meshes
         smpl_mesh.export(os.path.join(out_folder, 'smpl_mesh.obj'))
-        extracted_meshes[0].export(os.path.join(out_folder, 'LT_mesh.obj'))
-        extracted_meshes[1].export(os.path.join(out_folder, 'AT_mesh.obj'))
-        extracted_meshes[2].export(os.path.join(out_folder, 'BT_mesh.obj'))
+        mesh_ss[0].export(os.path.join(out_folder, 'LT_mesh.obj'))
+        mesh_ss[1].export(os.path.join(out_folder, 'AT_mesh.obj'))
+        mesh_ss[2].export(os.path.join(out_folder, 'BT_mesh.obj'))
         
         print(f'Meshes saved in {os.path.abspath(out_folder)}')
     else:

@@ -1,58 +1,59 @@
+import os
 import pickle
 
+import hydra
 import numpy as np
 import torch
 from tqdm import tqdm
 import trimesh
 from lib.HIT.hit.model.deformer import skinning
+from lib.HIT.hit.model.mysmpl import MySmpl
 from lib.HIT.hit.utils.model import HitLoader
 from lib.SMPL import SMPL
 import open3d as o3d
 
-if __name__ == "__main__":
-    bdata = np.load('data/motion/Jog_3_poses.npz')
-    exp_name = 'hit_male'
-    ckpt_choice = 
+@hydra.main(version_base=None, config_name='config', config_path='../config')
+def main(config):
+    pose_config = config.pose
+    bdata = np.load(pose_config.data)
 
     with open('outputs/fit/smpl_fit_params.pkl', 'rb') as f:
         data_dict = pickle.load(f)
     
 
     # Extract the individual pose arrays
-    # print(bdata['gender'])
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+    betas = data_dict['betas'].to(device=device, dtype=torch.float)
+    
     # Load pkl
-    with open('outputs/hit_male_best/hit_infer.pkl', 'rb') as f:
+    with open('outputs/hit_best/hit_infer.pkl', 'rb') as f:
         hit_dict = pickle.load(f)
     
     weights = hit_dict['weights']
-    meshes = hit_dict['seg_meshes']
+    meshes = hit_dict['meshes']
 
-    a = skinning(meshes[0], weights[0])
+    smpl = MySmpl('data/models', 'male').to(device)
 
     translation = torch.from_numpy(bdata['trans']).to(device=device, dtype=torch.float)
     pose_body = torch.from_numpy(bdata['poses'][:, :66])  # Joint 22 and 23 (hands) are not the same as SMPL
     pose_body = torch.cat((pose_body, torch.zeros(pose_body.shape[0], 6)), dim=1).to(device=device, dtype=torch.float)
-    smpl = SMPL('data/models/SMPL_MALE.pkl', device)
-    smpl.eval()
 
     # scene = trimesh.Scene()
-    for i in tqdm(range(0, pose_body.shape[0], 10)):
-        # print(translation[i].shape, pose_body[i].shape, betas.shape)
-        vertex = smpl(translation[i], pose_body[i], betas)
-        # mesh = trimesh.Trimesh(vertices=vertex.cpu().numpy(), faces=smpl.data['f'].cpu().numpy())
-        # node_name = f"Frame_{i:03d}"
-        smpl.save_obj(vertex, f'outputs/motion/motion_{i:04d}.obj')
-        
-        # scene.add_geometry(mesh, node_name=node_name, extras={"frame_index": i})
+    tissues = ['LT', 'AT', 'BT']
+    
+    for t in tissues:
+        os.makedirs(f'outputs/motion_seg/{t}', exist_ok=True)
 
-    # scene.animations = [{
-    #     'name': 'SMPL_Vertex_Animation',
-    #     'time': times.tolist(),
-    #     'weights': weights.tolist()
-    # }]
+    for i in tqdm(range(0, 300, 10)):
+        output = smpl(betas.unsqueeze(0), translation[i].unsqueeze(0), pose_body[i, 3:].unsqueeze(0),  pose_body[i, :3].unsqueeze(0))
+        for c in range(len(tissues)):
+            # print(translation[i].shape, pose_body[i].shape, betas.shape)
+            vertices = torch.from_numpy(np.asarray(meshes[c].vertices)).to(device=device, dtype=torch.float)
+            skinned = skinning(vertices, weights[c].squeeze(), output.tfs, inverse=False)
 
-    # 6. Export to a single integrated asset
-    # scene.export("smpl_vertex_animation.glb")
+            mesh = trimesh.Trimesh(vertices=skinned.detach().cpu(), faces=meshes[c].faces)
+            mesh.export(f'outputs/motion_seg/{tissues[c]}/motion_{i:04d}.obj')
+
+if __name__ == "__main__":
+    main()
         

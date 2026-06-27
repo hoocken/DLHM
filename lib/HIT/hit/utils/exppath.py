@@ -23,6 +23,8 @@ class Exppath:
     def find_train_folder(self):
         # if self.local == True:
         train_folder = os.path.join(cg.trained_models_folder, self.exp_name)
+        print(cg.trained_models_folder)
+        print('pkg', cg.package_directory)
         # else:
         #     if self.is_experiment_on_cluster and self.is_experiment_local:
         #         raise ValueError('Both local and remote wandb runs found')

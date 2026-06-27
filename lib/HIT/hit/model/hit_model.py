@@ -117,6 +117,7 @@ class HITModel(torch.nn.Module):
         mesh_p_list = []
         mesh_c_list = []
         weights_list = []
+        mesh_faces = []
         for ci, c_label in enumerate(self.train_cfg.mri_labels):
             if c_label != 'NO':
                 mesh_s = self.extract_mesh(smpl_output_xpose, channel=ci, grid_res=64, 
@@ -132,7 +133,9 @@ class HITModel(torch.nn.Module):
                 mesh_p_list.append(mesh_p)
                 mesh_c_list.append(mesh_s)
                 weights_list.append(weights)
-        return mesh_p_list, mesh_c_list, weights_list
+                mesh_faces.append(mesh_s.faces)
+
+        return mesh_p_list, mesh_c_list, weights_list, mesh_faces
     
     
     def extract_shaped_mesh(self, smpl_output, channel=1, grid_res=64, max_queries=None, use_mise=False, mise_resolution0=32, bound_by_smpl=False):
@@ -161,16 +164,18 @@ class HITModel(torch.nn.Module):
         x_c = self.deformer.disp_network(x_s, cond) + x_s
 
         # skinning
-        w = self.deformer.query_weights(x_c, {'latent': cond['lbs'], 'betas': cond['betas']*0})               
+        w = self.deformer.query_weights(x_c, {'latent': cond['lbs'], 'betas': cond['betas']*0}) 
+        # print(x_c.shape, x_s.shape, w.shape)              
         xd = skinning(x_s[0], w[0], tfs, inverse=False)
+        # print(xd.shape)
         
         if do_compress:
             raise DeprecationWarning("This is wrong, do not use. Instead use the posed extraction")
             d_p = self.deformer.compressor(x_s, cond)
             xd = xd + d_p[0]
         
-        mesh_p = trimesh.Trimesh(vertices=xd.detach().cpu().numpy(), faces=mesh_s.faces)
-        return mesh_p, w
+        # mesh_p = trimesh.Trimesh(vertices=xd.detach().cpu().numpy(), faces=mesh_s.faces)
+        return xd, w
                 
                 
         

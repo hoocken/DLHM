@@ -29,7 +29,7 @@ if [[ "$3" == "male" ]]; then
 elif [[ "$3" == "female" ]]; then
     EXPERIMENT_NAME="hit_female"
 else
-    echo "Error: Only 'MALE' or 'FEMALE' is allowed." >&2
+    echo "Error: Only 'male' or 'female' is allowed." >&2
     print_help
     exit 1
 fi
@@ -46,6 +46,9 @@ else
     echo "Error: Conda profile script not found at $CONDA_PROFILE_PATH"
     exit 1
 fi
+
+# Create outputs folder
+mkdir -p outputs
 
 # Activate the environment
 conda activate "$HUMAN3D_ENV_NAME"
