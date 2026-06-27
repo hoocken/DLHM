@@ -12,7 +12,9 @@ import numpy as np
 from torch.optim import Adam
 from torch.optim.lr_scheduler import StepLR
 from tqdm import tqdm
+import trimesh
 
+from lib.HIT.hit.model.mysmpl import MySmpl
 from lib.SMPL import SMPL
 from .loss import DataLoss, PosePriorLoss, ShapePriorLoss
 
@@ -55,7 +57,7 @@ class Registration(nn.Module):
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.smpl = SMPL(self.path, self.device)
+        self.smpl = MySmpl(self.path, config.gender).to(self.device)
         self.voxel_size = config.voxel_size
         
         self.point_cloud, self.scan_centroids, self.name = self._prepare_point_cloud(seg)
@@ -86,9 +88,11 @@ class Registration(nn.Module):
         self.epoch = config.epoch
 
     def _initalize_parameters(self, initial_pose):
-        self.trans = nn.Parameter(torch.zeros(3, dtype=torch.float32))
-        self.pose = nn.Parameter(torch.hstack([torch.zeros(3, dtype=torch.float32), initial_pose]))
-        self.betas = nn.Parameter(torch.zeros(self.smpl.beta_shape, dtype=torch.float32))
+        self.trans = nn.Parameter(torch.zeros((1, 3), dtype=torch.float32))
+        self.pose = nn.Parameter(initial_pose[None, :])
+        self.global_orient = nn.Parameter(torch.zeros((1, 3), dtype=torch.float32))
+        # self.pose = nn.Parameter(torch.hstack([torch.zeros((1, 3), dtype=torch.float32), initial_pose]))
+        self.betas = nn.Parameter(torch.zeros((1, self.smpl.nb_betas), dtype=torch.float32))
 
     def _prepare_point_cloud(self, segmentations: str):
         with open(segmentations, 'rb') as f:
@@ -136,10 +140,10 @@ class Registration(nn.Module):
     
     def _calculate_model_centroids(self, model):
         centroids = torch.zeros_like(self.scan_centroids)
-        segmentations = self.smpl.joint_indices.detach().clone()
+        
+        segmentations = self.smpl.part_ids.detach().clone()
 
         mapping = self._map_joints_to_body_parts(segmentations)
-
         # Calculate centroids
         for i in range(centroids.shape[0]):
             centroids[i] = model[mapping == i].mean(dim=0)
@@ -169,7 +173,8 @@ class Registration(nn.Module):
         pbar = tqdm(total=self.init_epoch, initial=0, ncols=0, desc="Initializing")
         total_loss = -1
         for i in range(self.init_epoch):
-            model = self.smpl(self.trans, self.pose, torch.zeros_like(self.betas))
+            output = self.smpl(torch.zeros_like(self.betas), self.trans, self.pose, self.global_orient)
+            model = output.vertices.squeeze()
             # Calculate model centroids
             model_centroids = self._calculate_model_centroids(model)
         
@@ -198,12 +203,13 @@ class Registration(nn.Module):
         patience = 0
 
         for i in range(start, self.epoch):
-            model = self.smpl(self.trans, self.pose, self.betas)
-        
+            output = self.smpl(self.betas, self.trans, self.pose, self.global_orient)
+            model = output.vertices.squeeze()
+
             # Chamfer distance
             data = self.data_loss(model, self.point_cloud)
-            pose_prior = self.pose_prior_loss(self.pose[3:])
-            shape_prior = self.shape_prior_loss(self.betas)
+            pose_prior = self.pose_prior_loss(self.pose.squeeze())
+            shape_prior = self.shape_prior_loss(self.betas.squeeze())
             
             # Combined loss
             total_loss = data + self.lambda_prior_pose * pose_prior +  self.lambda_prior_shape * shape_prior
@@ -249,11 +255,14 @@ class Registration(nn.Module):
         pcd.points = o3d.utility.Vector3dVector(self.point_cloud.cpu().numpy())
 
         o3d.io.write_point_cloud(self.output_dir / 'point_cloud.ply', pcd)
-        self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / f'smpl_fit_{self.name}.obj')
+        output = self.smpl(self.betas, self.trans, self.pose, self.global_orient)
+        mesh = trimesh.Trimesh(vertices=output.vertices.squeeze().detach().cpu(), faces=output.faces)
+        mesh.export(self.output_dir / f'smpl_fit_{self.name}.obj')
+        # self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / f'smpl_fit_{self.name}.obj')
         result = {
-            "trans" : torch.zeros_like(self.trans) , # Zero out the translation
-            "pose" : torch.zeros_like(self.pose), # Zero out the pose
-            "betas" : self.betas.detach().cpu()
+            "trans" : torch.zeros_like(self.trans.squeeze().cpu()) , # Zero out the translation
+            "pose" : torch.zeros_like(self.pose.squeeze().cpu()), # Zero out the pose
+            "betas" : self.betas.squeeze().detach().cpu()
         }
 
         with open('outputs/fit/smpl_fit_params.pkl', "wb") as f:
