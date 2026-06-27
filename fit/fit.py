@@ -8,7 +8,7 @@ import torch
 
 from fit.model import Registration
 
-@hydra.main(version_base=None, config_name='config', config_path='config')
+@hydra.main(version_base=None, config_name='config', config_path='../config')
 def main(config):
     with open(config.model.prior, 'rb') as f:
         gmm = pickle.load(f, encoding='latin1')
