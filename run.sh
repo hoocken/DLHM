@@ -2,13 +2,14 @@
 
 # Function to print usage guidelines
 print_help() {
-    echo "Usage: $0 <INPUT> <male | female> <MOTION>"
+    echo "Usage: $0 <INPUT> <male | female> -m <MOTION>"
     echo ""
     echo "Options:"
     echo "  -h, --help    Show this help message and exit"
+    echo "  -m       Input motion to animate segmentations"
     echo ""
     echo "Example:"
-    echo "  $0 data/input/tr_scan_066.ply male data/mmotion/Jog_3_poses.npz"
+    echo "  $0 data/input/tr_scan_066.ply female --motion data/motion/Jog_3_poses.npz"
 }
 
 # Check if the user asked for help explicitly
@@ -17,11 +18,31 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     exit 0
 fi
 
-if [ "$#" -lt 3 ]; then
-    echo "Error: Three arguments are required." >&2
+if [ "$#" -lt 2 ]; then
+    echo "Error: Two arguments are required." >&2
     print_help
     exit 1
 fi
+
+MOTION=""
+while getopts "m:" opt; do
+    case ${opt} in
+        m )
+            MOTION=$OPTARG
+            ;;
+        h )
+            print_help
+            ;;
+        \? )
+            echo "Invalid option: -$OPTARG" 1>&2
+            print_help
+            ;;
+        : )
+            echo "Invalid option: -$OPTARG requires an argument" 1>&2
+            print_help
+            ;;
+    esac
+done
 
 # Set model and experiment to male or female
 if [[ "$2" == "male" ]]; then
@@ -78,11 +99,16 @@ echo "---------------------------------------------------"
 # Run HIT
 python lib/HIT/demos/infer_smpl.py --exp_name=$EXPERIMENT_NAME --to_infer smpl_file --target_body outputs/fit/smpl_fit_params.pkl
 
+if [[ "$MOTION" == "" ]]; then
+    exit 0
+fi
+
+
 echo "---------------------------------------------------"
 echo "|                     MOTION                      |"
 echo "---------------------------------------------------"
 
 # Pose HIT
-python src/pose_extraction/pose_hit.py pose.data=$3
+python src/pose_extraction/pose_hit.py pose.data=$MOTION
 
 conda deactivate
