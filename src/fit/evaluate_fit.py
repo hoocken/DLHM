@@ -23,14 +23,14 @@ def evaluate(points, target):
 
 def check_v2v(model: str, id: int, results: list):
     # Load SMPL
-    with open('ouptuts/fit/smpl_fit_params.pkl', 'rb') as f:
+    with open('outputs/fit/smpl_fit_params.pkl', 'rb') as f:
         param_dict = pickle.load(f)
     
     trans = param_dict['trans']
     pose = param_dict['pose']
     betas = param_dict['betas']
 
-    smpl = MySmpl(model, 'cpu')
+    smpl = MySmpl('data/models', gender=model)
     
     points = smpl(trans, pose, betas)
     target = f'data/target/tr_reg_{id:03d}.ply'
@@ -50,12 +50,13 @@ if __name__ == "__main__":
     # No shape reg
     results_no_shape_reg = []
 
-    model = ["data/models/SMPL_MALE.pkl", "data/models/SMPL_FEMALE.pkl"]
+    model = ["male", "female", "male", "male", "female", "female", "female", "male", "female", "male"]
     index = 0
 
     for i in range(0, 100, 2):
+        index = i // 10
         print(f"Logging tr_scan_{i:03d}")
-        proc = subprocess.Popen(["bash", "run.sh", f"data/input/tr_scan_{i:03d}.ply", "data/ckpts/human3d.ckpt", model[index]], stdout=subprocess.PIPE, text=True)
+        proc = subprocess.Popen(["bash", "run.sh", f"data/input/tr_scan_{i:03d}.ply", model[index], ], stdout=subprocess.PIPE, text=True)
         check_v2v(model, i, results)
 
         proc = subprocess.Popen(["uv", "run", "fit.py", f"model.base_model={model[index]}", "model.init_epoch=0"], stdout=subprocess.PIPE, text=True)
@@ -65,8 +66,6 @@ if __name__ == "__main__":
         check_v2v(model, i, results_no_reg)   
 
         # Switch model every 10 scans
-        if (i + 2) % 10 == 0:
-            index = (index + 1) % 2
 
     categories = ["Normal", "No Init", "No Reg"]
     values = [mean(results), mean(results_no_init), mean(results_no_reg)]
