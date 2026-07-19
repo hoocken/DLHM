@@ -152,6 +152,7 @@ class FEM():
 
     def solve_v_next(self, v, rotation, f_ext, dt):
         rotation = rotation.to(self.device)
+        print(rotation)
         rotation = self._block_diag_rotation(rotation)
 
         K_p = self._assemble_Kp(rotation)
@@ -193,7 +194,7 @@ class FEM():
         return P.transpose(1, 2)
 
     def calculate_R(self):
-        Q = self.P
+        Q = self._calculate_P()
         A = torch.linalg.solve(self.P.transpose(1, 2), Q.transpose(1, 2)).transpose(1, 2)
         B = A[:, :3, :3]
         R = self._polar_decomposition(B)
