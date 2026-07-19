@@ -135,7 +135,7 @@ class HITModel(torch.nn.Module):
                 weights_list.append(weights)
                 mesh_faces.append(mesh_s.faces)
 
-        return mesh_p_list, mesh_c_list, weights_list, mesh_faces
+        return mesh_p_list, mesh_c_list, weights_list, smpl_output_xpose, mesh_faces
     
     
     def extract_shaped_mesh(self, smpl_output, channel=1, grid_res=64, max_queries=None, use_mise=False, mise_resolution0=32, bound_by_smpl=False):

@@ -84,7 +84,7 @@ def main():
         
     elif args.output == 'meshes':
         # Extract the mesh 
-        _, mesh_ss, weights, _ = hl.hit_model.forward_rigged(data['betas'], 
+        _, mesh_ss, weights, smpl_x_pose, _ = hl.hit_model.forward_rigged(data['betas'], 
                                                                 body_pose=data['body_pose'], 
                                                                 global_orient=data['global_orient'], 
                                                                 transl=data['transl'],
@@ -94,7 +94,7 @@ def main():
         # AT : Adipose Tissue (subcutaneous fat)
         # BT : Bone Tissue (long bones, we only predict the femur, radius-ulna, tibia and fibula)
 
-        smpl_mesh = trimesh.Trimesh(vertices=smpl_output.vertices[0].detach().cpu().numpy(), faces=hl.smpl.faces)
+        smpl_mesh = trimesh.Trimesh(vertices=smpl_x_pose.vertices[0].detach().cpu().numpy(), faces=hl.smpl.faces)
         
         data_dict = {'smpl_mesh': smpl_mesh.vertices, 'meshes': mesh_ss, 'weights': weights}
         with open(f'{out_folder}/hit_infer.pkl', 'wb') as f:
