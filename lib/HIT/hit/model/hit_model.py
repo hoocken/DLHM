@@ -136,6 +136,29 @@ class HITModel(torch.nn.Module):
                 mesh_faces.append(mesh_s.faces)
 
         return mesh_p_list, mesh_c_list, weights_list, smpl_output_xpose, mesh_faces
+
+    def forward_points(self, betas, points, **kwargs):
+        points = torch.FloatTensor(points).to(betas.device)
+        points = points.unsqueeze(0)
+        # smpl shaped in xpose
+        # smpl = MySmpl(model_path=cg.smplx_models_path, modelgender=self.smpl.gender, device=betas.device)
+        smpl = self.smpl
+        smpl_output_xpose = smpl.forward(betas=betas, body_pose=smpl.x_cano().to(betas.device), global_orient=None, transl=None)  
+            
+
+        pred = self.query_points(smpl_output_xpose,
+                                points,
+                                template=False, 
+                                unposed = True)
+
+        cond = cond_create(betas, smpl.x_cano().to(betas.device), self.generator, self.smpl)
+
+        x_c = self.deformer.disp_network(points, cond) + points
+
+        # query skinning weights
+        w = self.deformer.query_weights(x_c, {'latent': cond['lbs'], 'betas': cond['betas']*0}) 
+
+        return pred, w
     
     
     def extract_shaped_mesh(self, smpl_output, channel=1, grid_res=64, max_queries=None, use_mise=False, mise_resolution0=32, bound_by_smpl=False):
@@ -672,6 +695,61 @@ class HITModel(torch.nn.Module):
             # vertex_colors = self.color_points(torch.from_numpy(verts).reshape(1, -1, 3).to(device), b_smpl_output_list[b_ind], max_queries)[0]
             mesh_list.append(mesh)
         return mesh_list
+
+    @torch.no_grad()
+    def query_points(self, smpl_output, queries, max_queries=None, template=False, unposed=False):
+            
+        if max_queries is None:
+            max_queries = int(self.train_cfg['max_queries'])
+        scale = 1  # padding
+
+        verts = smpl_output.vertices
+        B = verts.shape[0]
+        device = verts.device
+        b_smpl_output_list = self.batchify_smpl_output(smpl_output)
+        
+        if template == True:
+            # All the meshes are the same, only extract the first one
+            B = 1
+            b_smpl_output_list = [b_smpl_output_list[1]]
+
+        b_min, b_max = verts.min(dim=1).values, verts.max(dim=1).values  # B,3
+        gt_center = ((b_min + b_max)*0.5).cpu()  # B,3
+        gt_scale = (b_max - b_min).max(dim=-1, keepdim=True).values.cpu()  # (B,1)
+        
+        value_list = []
+        for b_ind in range(B):
+            points = queries
+            print('Querying points...')
+            points = scale * points # Points already centered and scaled
+
+            # check occupancy for sampled points
+            occ_hats = []
+            for pts in torch.split(points, max_queries, dim=1):
+                
+                # import ipdb; ipdb.set_trace()
+                skinning_weights, part_id = get_skinning_weights(pts[0].cpu().numpy(), 
+                                                                    b_smpl_output_list[b_ind].vertices[0].cpu().numpy(), 
+                                                                    self.smpl)
+                skinning_weights = torch.FloatTensor(skinning_weights).to(device)
+                
+                # import ipdb; ipdb.set_trace() 
+                output = self.query(pts.to(device=device), b_smpl_output_list[b_ind], eval_mode=True, 
+                                template=template, unposed=unposed,
+                                part_id=part_id, skinning_weights=skinning_weights)
+                
+                pred = output['pred_occ']
+
+                    
+                occ_hats.append(F.softmax(pred, dim=-1))
+                
+            # print('Done.')
+            values = torch.cat(occ_hats, dim=0).cpu().numpy().astype(np.float64)
+            value_list.append(values)
+
+        values = np.stack(value_list)
+        
+        return values
     
     @torch.no_grad()
     def  generate_canonical_mesh(self, batch, channel_index):
