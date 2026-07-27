@@ -1,15 +1,9 @@
-import sys
-
 import numpy as np
+import torch
 from pyvista import UnstructuredGrid
 import pyvista as pv
-import tetgen
-import torch
 from torch_sla import SparseTensor
-from tqdm import tqdm
 from torchtyping import TensorType
-
-from create_tetrahedral_mesh import Tetrahedralize
 
 class FEM():
     def __init__(
@@ -33,24 +27,15 @@ class FEM():
 
         self.Dm = self._calculate_Dm(self.X_rest)
         self.V = torch.abs(torch.linalg.det(self.Dm))/ 6
-        # print(self.tets.shape)
-
-        # tet_temp
-        # self.tets[self.V < 0, 1] = self.tets[self.V < 0, 2]
-        # self.Dm = self._calculate_Dm(self.X_rest)
-        # self.V = torch.linalg.det(self.Dm)/ 6
         self.Dm_inv = torch.linalg.inv(self.Dm.transpose(1, 2))
-
 
         # Volume of tets
         self.V = self.V[:, None, None]
-        print(self.V)
         
         # Strain-displacement matrix
         self.B = self._calculate_B(self.Dm_inv) 
         # Elasticity matrix
         self.E = self._calculate_E(young, poisson)
-
 
         # Per-element stiffness matrix
         self.Ke = self.V * (self.B.transpose(1, 2) @ self.E @ self.B)
@@ -61,12 +46,8 @@ class FEM():
         # Damping factor
         self.c = damping
 
-        self.prev_R = torch.eye(3, device=self.device, dtype=torch.float64).unsqueeze(0).expand(self.tets_count, -1, -1)
-
         dof = torch.stack([self.tets * 3, self.tets * 3 + 1, self.tets * 3 + 2], dim=-1) # (M, 4, 3)
         self.dof = dof.reshape(self.tets_count, 12) # (M, 12)
-
-        self.P = self._calculate_P()
 
         # Indices from 0 to 3 * N about pairs of nodes (expanded to their x, y, z) that are connected with an edge
         row = self.dof.unsqueeze(2).expand(-1, -1, 12).reshape(self.tets_count, -1) # (M, 12 * 12)
@@ -74,10 +55,10 @@ class FEM():
         self.row = row.reshape(-1) # (M * 12 * 12)
         self.col = col.reshape(-1) # (M * 12 * 12)
 
-        mask = torch.from_numpy(self.mesh.point_data["is_lean"] == True)
+        mask = torch.from_numpy(self.mesh.point_data['is_lean'] == True)
         self.mask = mask.unsqueeze(-1).expand(-1, 3).reshape(-1).to(self.device)
 
-        self.collision = 1e-1
+        self.weights = torch.from_numpy(self.mesh.point_data['weights']).to(self.device)
 
     def _lame_parameters(self, E, nu):
         lam = (E * nu) / ((1 + nu) * (1 - 2 * nu))
@@ -267,36 +248,6 @@ class FEM():
 
         return P.transpose(1, 2)
 
-    def calculate_R(self):
-        """
-        Calculates the rotation matrix through Dm @ Dm_rest.inv
-        which is solved through a linear solver.
-        """
-        # Q = self._calculate_P()
-        # A = torch.linalg.solve(self.P.transpose(1, 2), Q.transpose(1, 2)).transpose(1, 2)
-        # B = A[:, :3, :3]
-        # R = self._polar_decomposition(B)
-
-        # x0, x1, x2, x3 = self.points[self.tets]
-        Ds = self._calculate_Dm(self.points)
-        
-        # F = Ds @ torch.linalg.inv(self.Dm.transpose(1, 2))
-
-        # tet_points = self.points[self.tets]
-        # Dm = tet_points[:, 1:, :] - tet_points[:, 0:1, :]
-        # Solve R = Dm @ self.Dm.inv
-        F = torch.linalg.solve(self.Dm, Ds).transpose(1, 2)
-        # print(self.Dm)
-        # print(Ds)
-        # print("F", F)
-        R = self._polar_decomposition(F)
-        R[R < 1e-8] = 0
-
-        # print(R, R.transpose(1, 2) @ F)
-        # return torch.eye(R.shape[1]).unsqueeze(0).expand(R.shape[0], -1, -1)
-        # print(R)
-        return R
-
     def calculate_R_shape_matching(self, weights=None):
         """
         Per-tet rotation via energy-minimization / shape matching
@@ -342,72 +293,70 @@ class FEM():
         R = (V * d.unsqueeze(1)) @ U.transpose(-2, -1)   # (T,3,3)
         return R
 
-    def _polar_decomposition_newton(self, F, iters=20):
-        Y = F.clone()
-        for _ in range(iters):
-            Y_inv_T = torch.linalg.inv(Y).transpose(-2, -1)
-            Y_next = 0.5 * (Y + Y_inv_T)
-            Y = Y_next
-        return Y
-
-    # def _polar_decomposition_newton(self, F, R_prev, iters=8, tol=1e-8):
-    #     Y = R_prev.clone()  # warm start, not F itself
-    #     for _ in range(iters):
-    #         Y_inv_T = torch.linalg.inv(Y).transpose(-2, -1)
-    #         # Higham scaling: stabilizes and speeds convergence, especially
-    #         # important near-degenerate F where naive averaging drifts slowly
-    #         gamma = (torch.linalg.matrix_norm(Y_inv_T, ord='fro')
-    #                 / torch.linalg.matrix_norm(Y, ord='fro')).sqrt()
-    #         gamma = gamma.view(-1, 1, 1)
-    #         Y_next = 0.5 * (gamma * Y + Y_inv_T / gamma)
-    #         diff = (Y_next - Y).abs().amax(dim=(-2, -1))
-    #         Y = Y_next
-    #         if (diff < tol).all():
-    #             break
-    #     return Y
-    
-    def _polar_decomposition(self, F):
+    def calculate_R_quaternion(self, weights=None):
         """
-        Polar decomposition F = R @ S via SVD, batched.
-        F: (N, 3, 3) -> R: (N, 3, 3) proper rotation (det = +1)
+        Per-element rotation via energy minimization in quaternion form
+        (Georgii & Westermann 2008, Sec. 3 / Muller et al. 2005 / Horn 1987).
+
+        Builds the 4x4 symmetric matrix N whose top eigenvector is the unit
+        quaternion q solving the constrained stationarity conditions
+        dE/dq + lambda*q = 0, dE/dlambda = 0 from the paper's Eqs. 4-6 --
+        i.e. this *is* the solution their Newton solver converges to,
+        obtained directly instead of iteratively.
         """
-        U, S, Vh = torch.linalg.svd(F)  # F = U @ diag(S) @ Vh
+        tet_points = self.points[self.tets]     # (T,4,3) current
+        rest_points = self.X_rest[self.tets]    # (T,4,3) rest
 
-        # R = U @ Vh gives the closest orthogonal matrix, but may be a
-        # reflection (det = -1) if F is inverted/degenerate. Fix by flipping
-        # the sign of the smallest singular vector's contribution.
-        det = torch.linalg.det(U @ Vh)  # (N,)
-        correction = torch.ones_like(S, dtype=torch.float64)
-        correction[:, -1] = torch.sign(det)  # flip last column if det < 0
-        U_corrected = U * correction.unsqueeze(1)  # scale last column of U
+        if weights is None:
+            w = torch.full((self.tets_count, 4), 0.25,
+                            device=self.device, dtype=torch.float64)
+        else:
+            w = weights  # (T,4)
 
-        R = U_corrected @ Vh
-        return R
+        c  = (tet_points  * w.unsqueeze(-1)).sum(dim=1)  # current centroid c
+        c0 = (rest_points * w.unsqueeze(-1)).sum(dim=1)  # rest centroid c0
 
-    def _polar_decomposition_eig(self, F, eps=1e-8):
-        U2 = F.transpose(1, 2) @ F
-        eigval, eigvec = torch.linalg.eigh(U2)
-        # eigval = eigval.clamp(min=eps)
-        U_inv = eigvec @ torch.diag_embed(torch.rsqrt(eigval)) @ eigvec.transpose(1, 2)
-        R = F @ U_inv
-        is_element_close = torch.isclose(R @ R.transpose(1, 2), torch.eye(3, dtype=torch.float64, device=self.device), rtol=1e-5, atol=1e-8)
-        is_element_not_close = ~is_element_close
-        matrix_not_close = is_element_not_close.any(dim=-1)
-        failed_indices, _ = torch.nonzero(matrix_not_close, as_tuple=True)
-        failed_indices = failed_indices.unique()
+        r_prime = tet_points  - c.unsqueeze(1)   # (T,4,3)  x+u-c
+        r       = rest_points - c0.unsqueeze(1)  # (T,4,3)  x-c0
+
+        # M[a,b] = sum_i w_i * r'_i[a] * r_i[b]  (current x rest cross-covariance)
+        M = torch.einsum('tv,tva,tvb->tab', w, r_prime, r)  # (T,3,3)
+
+        Sxx, Sxy, Sxz = M[:, 0, 0], M[:, 0, 1], M[:, 0, 2]
+        Syx, Syy, Syz = M[:, 1, 0], M[:, 1, 1], M[:, 1, 2]
+        Szx, Szy, Szz = M[:, 2, 0], M[:, 2, 1], M[:, 2, 2]
+
+        T = self.tets_count
+        N = torch.zeros(T, 4, 4, device=self.device, dtype=torch.float64)
+        N[:, 0, 0] = Sxx + Syy + Szz
+        N[:, 0, 1] = N[:, 1, 0] = Syz - Szy
+        N[:, 0, 2] = N[:, 2, 0] = Szx - Sxz
+        N[:, 0, 3] = N[:, 3, 0] = Sxy - Syx
+        N[:, 1, 1] = Sxx - Syy - Szz
+        N[:, 1, 2] = N[:, 2, 1] = Sxy + Syx
+        N[:, 1, 3] = N[:, 3, 1] = Szx + Sxz
+        N[:, 2, 2] = -Sxx + Syy - Szz
+        N[:, 2, 3] = N[:, 3, 2] = Syz + Szy
+        N[:, 3, 3] = -Sxx - Syy + Szz
+
+        # N is symmetric -> eigh gives real eigenvalues, ascending order.
+        _, eigvecs = torch.linalg.eigh(N)
+        q = eigvecs[:, :, -1]   # (T,4) top eigenvector = (w, x, y, z)
+
+        w_, x, y, z = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
+        R = torch.zeros(T, 3, 3, device=self.device, dtype=torch.float64)
+        R[:, 0, 0] = 1 - 2 * (y*y + z*z)
+        R[:, 0, 1] = 2 * (x*y - w_*z)
+        R[:, 0, 2] = 2 * (x*z + w_*y)
+        R[:, 1, 0] = 2 * (x*y + w_*z)
+        R[:, 1, 1] = 1 - 2 * (x*x + z*z)
+        R[:, 1, 2] = 2 * (y*z - w_*x)
+        R[:, 2, 0] = 2 * (x*z - w_*y)
+        R[:, 2, 1] = 2 * (y*z + w_*x)
+        R[:, 2, 2] = 1 - 2 * (x*x + y*y)
+
         return R
     
-    
-    def _clean_rotation_matrix(self, R):
-        U, S, Vh = torch.linalg.svd(R)
-        det = torch.linalg.det(U @ Vh)
-
-        d = torch.ones_like(S)
-        d[..., -1] = torch.sign(det)
-
-        R_clean = (U * d[..., None, :]) @ Vh
-        return R_clean
-
     def ground_penalty_force(self, gravity: TensorType["points"], v: TensorType["points"], ground_y=0.0, k=5, friction=0.5):
         """
         Calculates penalty force for touching the ground and the friction.
@@ -516,9 +465,6 @@ class FEM():
         tet_mass = density * self.V[:, 0, 0]  # (N,) mass per tet
         # print(tet_mass)
 
-        a = torch.ones(3 * self.points_count, 3 * self.points_count, device=self.device, dtype=torch.float64) * 0.1
-        
-
         node_mass = torch.zeros(self.points_count, device=self.device, dtype=torch.float64)
         node_mass = node_mass.index_put_((self.tets.reshape(-1),), (tet_mass[:, None] / 4).expand(-1, 4).reshape(-1), accumulate=True)
         # return torch.ones(3 * self.points_count,  device=self.device, dtype=torch.float64) * 1e-2
@@ -558,215 +504,3 @@ class FEM():
         rhs_bc[fixed_dofs] = prescribed_value
 
         return K_bc, rhs_bc
-
-_CUBE_TETS = [
-    (0, 1, 3, 7),
-    (0, 1, 7, 5),
-    (0, 5, 7, 4),
-    (0, 3, 2, 7),
-    (0, 2, 6, 7),
-    (0, 6, 4, 7),
-]
-
-def make_box_mesh(size=(1.0, 1.0, 1.0), res=(6, 6, 6), center=(0.0, 0.0, 0.0)):
-    """
-    Build a tetrahedralized rectangular box.
-
-    size: (sx, sy, sz)   physical dimensions of the box
-    res:  (nx, ny, nz)   number of vertices along each axis (>=2)
-    center: (cx, cy, cz) world-space center of the box
-
-    Returns a Mesh.
-    """
-    nx, ny, nz = res
-    sx, sy, sz = size
-    cx, cy, cz = center
-
-    xs = np.linspace(-sx / 2, sx / 2, nx) + cx
-    ys = np.linspace(-sy / 2, sy / 2, ny) + cy
-    zs = np.linspace(-sz / 2, sz / 2, nz) + cz
-
-    # vertex index lookup: (i,j,k) -> flat index
-    def vidx(i, j, k):
-        return (i * ny + j) * nz + k
-
-    vertices = np.zeros((nx * ny * nz, 3))
-    for i in range(nx):
-        for j in range(ny):
-            for k in range(nz):
-                vertices[vidx(i, j, k)] = [xs[i], ys[j], zs[k]]
-
-    tets = []
-    for i in range(nx - 1):
-        for j in range(ny - 1):
-            for k in range(nz - 1):
-                # 8 corners of this cube cell, ordered per _CUBE_TETS convention
-                corners = [
-                    vidx(i, j, k),
-                    vidx(i + 1, j, k),
-                    vidx(i, j + 1, k),
-                    vidx(i + 1, j + 1, k),
-                    vidx(i, j, k + 1),
-                    vidx(i + 1, j, k + 1),
-                    vidx(i, j + 1, k + 1),
-                    vidx(i + 1, j + 1, k + 1),
-                ]
-                for a, b, c, d in _CUBE_TETS:
-                    tets.append((corners[a], corners[b], corners[c], corners[d]))
-
-    return pv.UnstructuredGrid({pv.CellType.TETRA: np.array(tets, dtype=np.int64)}, vertices)
-
-def make_velocity_glyphs(points, v, points_count, scale=1):
-    pts = points.detach().cpu().numpy()
-    v3 = v.reshape(points_count, 3).detach().cpu().numpy()
-    poly = pv.PolyData(pts)
-    poly["velocity"] = v3
-    poly.set_active_vectors("velocity")
-    # factor controls arrow length relative to vector magnitude; tune to taste
-    return poly.glyph(orient="velocity", scale="velocity", factor=scale)
-
-def tetrahedron():
-    points = np.array([
-        [0.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [0.5, 1.0, 0.0],
-        [0.5, 0.5, 1.0]
-    ])
-
-    # 2. Define the cell connectivity: [number_of_points_in_cell, pt0_id, pt1_id, pt2_id, pt3_id]
-    cells = [[0, 1, 2, 3]]
-
-    # 3. Define the cell type (PyVista TETRA cell type)
-    cell_type = pv.CellType.TETRA
-
-    # 4. Create the unstructured grid
-    grid = pv.UnstructuredGrid({pv.CellType.TETRA: np.array(cells, dtype=np.int64)}, points)
-    return grid
-
-# if __name__ == "__main__":
-#     # tet = Tetrahedralize("outputs/hit_best/smpl_mesh.obj", "outputs/hit_best/AT_mesh.obj", "outputs/hit_best/LT_mesh.obj")
-#     # tet.create_tetrahedra_mesh()
-#     # cube = make_box_mesh(size=(1, 1, 1), res=(2, 2, 2), center=(0.0, 2.0, 0.0))
-#     # cube = pv.Sphere()
-#     # cube = cube.triangulate()
-#     # tet = tetgen.TetGen(cube)
-#     # tet.tetrahedralize(
-#     #     nobisect=True,
-#     #     quality=True,
-#     #     mindihedral=30.0,
-#     #     minratio=1.1,
-#     # )
-#     # cube = tet.grid
-#     # cube = pytetwild.tetrahedralize_pv(cube)
-#     tet_mesh = pv.read("mesh.vtu")
-
-#     # cube = tetrahedron()
-#     # tet_mesh = cube
-#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#     fem = FEM(
-#         tet_mesh, 
-#         device,
-#         young=5e3,
-#         poisson=0.4,
-#         density=1e3,
-#         damping=0.9,    
-#     )
-
-#     # rot = torch.eye(3).unsqueeze(0).expand(fem.tets.shape[0], -1, -1)
-#     f_g = torch.zeros(3 * fem.points.shape[0]).to(device='cuda', dtype=torch.float64)
-#     f_g[list(range(1, 3 * fem.points.shape[0], 3))] = - fem.M[list(range(1, 3 * fem.points.shape[0], 3))] * 9.81 * 1
-#     v = torch.zeros(fem.points_count * 3)
-#     # v[list(range(1, 3 * fem.points.shape[0], 3))] = -1
-#     # fem.points[1, 2] += -0.1
-#     # v[3] = 1
-
-#     ground_y = - 0.5 + fem.points[:, 1].min().item()
-
-#     plotter = pv.Plotter()
-#     mesh = pv.UnstructuredGrid({pv.CellType.TETRA: fem.tets.cpu().numpy()}, fem.points.cpu().numpy())
-#     actor = plotter.add_mesh(
-#         mesh, color="coral", 
-#         show_edges=True, 
-#         smooth_shading=True, 
-#         style="surface", 
-#         # opacity=0.1,
-#     )
-
-#     # cond = torch.any(fem.tets == 4687 // 3, 1) & torch.any(fem.tets == 4021 // 3, 1)
-#     cond = torch.any(fem.tets >= 0, 1)
-#     # print(fem.tets.unique(return_counts=True)[1][4687 // 3])
-#     tetra = (cond).nonzero().squeeze()
-#     mesh_subset = mesh.extract_cells(tetra.cpu())
-#     actor2 = plotter.add_mesh(
-#         pv.PolyData(mesh.points[1]),
-#         style="wireframe",
-#         color="blue",
-#         point_size=8,
-#         render_points_as_spheres=True,
-#         line_width=2,
-#         show_edges=True,
-#     )
-
-#     vel_glyphs = make_velocity_glyphs(fem.points, v, fem.points_count)
-#     f_glyphs = make_velocity_glyphs(fem.points, v, fem.points_count)
-#     vel_actor = plotter.add_mesh(vel_glyphs, color="yellow")
-#     f_actor = plotter.add_mesh(f_glyphs, color="red")
-
-#     # Ground plane for visual reference
-#     ground = pv.Plane(
-#         center=(fem.points[:, 0].mean().item(), ground_y, fem.points[:, 2].mean().item()),
-#         direction=(0, 1, 0),
-#         i_size=50, j_size=50,
-#     )
-#     plotter.add_mesh(ground, color="lightgray", opacity=0.5)
-
-#     print("Min volume:", fem.V.min().item(), "Max volume:", fem.V.max().item())
-#     print("Any near-zero:", (fem.V.abs() < 1e-8).sum().item())
-#     dt = 0.002
-#     T = 100
-#     plotter.show(interactive_update=True)
-
-#     # print("before", fem.points)
-#     # rot = torch.tensor([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]).to(dtype=torch.float64, device=device)
-#     # fem.points = (rot @ fem.points.transpose(0, 1)).transpose(0, 1)
-#     # print(fem.points)
-
-#     i = 0
-
-#     def step_once():
-#         global v  # or wrap all this in a small State object instead of relying on globals
-#         global i
-#         global rot
-#         f_ext = f_g \
-#         + fem.ground_penalty_force(f_g, v, ground_y, k=1000) \
-#         # + fem.self_collision_force()
-
-#         rot = fem.calculate_R_shape_matching()
-
-#         i += 1
-#         # print(torch.linalg.inv(rot).unsqueeze(1).shape)
-#         # print(torch.linalg.inv(rot).to(device, torch.float64) @ fem.points[fem.tets].transpose(1, 2).to(torch.float64))
-#         v, f = fem.solve_v_next(v, rot, f_ext, dt)
-#         vel_glyphs = make_velocity_glyphs(fem.points, v, fem.points_count, 0.01)
-#         f_glyphs = make_velocity_glyphs(fem.points, f, fem.points_count, 0.001)
-#         vel_actor.mapper.SetInputData(vel_glyphs)
-#         f_actor.mapper.SetInputData(f_glyphs)
-#         fem.solve_x_next(v, dt)
-
-#         mesh.points = fem.points.detach().cpu().numpy()
-#         actor.mapper.SetInputData(mesh)
-#         mesh_subset = pv.PolyData(mesh.points[1])
-        
-#         # print(fem.tets[tetra])
-#         idx = torch.argmin(f)
-#         actor2.mapper.SetInputData(mesh_subset)
-
-#         plotter.update()
-
-#     for i in tqdm(range(10000)):
-#         step_once()
-#         # pv.save_meshio(f"outputs/fem/{i}.obj", surface_mesh)
-
-#     plotter.add_key_event("p", step_once)
-#     plotter.show()
-    
