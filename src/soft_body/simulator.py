@@ -22,6 +22,7 @@ class Simulator():
                  plot=False, 
                 ):
         self.mesh = mesh
+        self.points = torch.from_numpy(mesh.points).to(device, torch.float64)
         tet_indices = mesh.extract_cells_by_type(pv.CellType.TETRA).cells.reshape(-1, 5)[:, 1:]
 
         # Set point weights
@@ -43,23 +44,24 @@ class Simulator():
                 (self.part_ids == 11) | \
                 (self.part_ids == 15)
 
-        print(self.part_ids.shape)
         self.mesh.point_data['is_lean'] = (tissue_class == 1) | (tissue_class == 3)
         self.mesh.point_data['is_lean'][mask.cpu()] = True
 
+
         # Remove all tetrahedra which has all points as lean tissue
-        non_lean_tets = np.all(self.mesh.point_data['is_lean'][tet_indices] == True, axis=1).nonzero()
+        non_lean_tets = np.any(self.mesh.point_data['is_lean'][tet_indices] == False, axis=1).nonzero()
 
-        # include_tets = np.unique(np.hstack([non_lean_tets[0], surface_cell_ids]))
+        include_tets = np.unique(np.hstack([non_lean_tets[0], surface_cell_ids]))
 
-        # self.mesh = self.mesh.extract_cells(non_lean_tets)
+        self.extract_mesh = self.mesh.extract_cells(non_lean_tets)
+        self.extracted_point_ids = np.unique(self.extract_mesh.point_data['vtkOriginalPointIds'])
 
         self.rest_mesh = self.mesh.copy(deep=True)
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.fem = FEM(
-            self.mesh,
+            self.extract_mesh,
             self.device,
             young=young,
             poisson=poisson,
@@ -81,14 +83,19 @@ class Simulator():
 
     def init_pose(self, points):
         """Only plot after initializing pose."""
-        self.fem.points = points.to(torch.float64)
+        self.mesh.points = points.cpu().numpy()
+
+        self.fem.points = points[self.extracted_point_ids].to(torch.float64)
 
         if self.plot:
             self._setup_plotter()
 
     def set_pinned_points(self, points):
+        self.mesh.points = points.cpu().numpy()
+        
         points = points.to(torch.float64)
-        self.fem.points[self.mesh.point_data['is_lean']] = points[self.mesh.point_data['is_lean']]
+        extracted_points = points[self.extracted_point_ids]
+        self.fem.points[self.fem.mesh.point_data['is_lean']] = extracted_points[self.fem.mesh.point_data['is_lean']]
 
     def _setup_plotter(self):
         self.plotter = pv.Plotter()
@@ -130,7 +137,7 @@ class Simulator():
         self.plotter.close()
 
     def plot_step(self):
-        self.mesh.points = self.fem.points.detach().cpu().numpy()
+        self.mesh.points[self.extracted_point_ids] = self.fem.points.detach().cpu().numpy()
         self.actor.mapper.SetInputData(self.mesh)
 
         vel_glyphs = self._make_velocity_glyphs(self.fem.points, self.v, self.fem.points_count, 0.00)

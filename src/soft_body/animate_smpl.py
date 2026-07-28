@@ -1,17 +1,11 @@
-import sys
-
 import hydra
 from lib.HIT.hit.model.mysmpl import MySmpl
 import torch
-import pickle
 import numpy as np
 import pyvista as pv
 
 from simulator import Simulator
 
-"""Given a SMPL parameters, infer the tissues occupancy"""
-
-import argparse
 import os
 import pickle
 import numpy as np
@@ -22,7 +16,6 @@ import shutil
 from lib.HIT.hit.utils.model import HitLoader
 from lib.HIT.hit.utils.data import load_smpl_data
 from lib.HIT.hit.model.deformer import skinning
-from lib.HIT.hit.utils.tensors import cond_create
 
 def predict_occ_from_points(points, hl, data, device):
     device = torch.device(device)
@@ -113,19 +106,17 @@ def main(config):
 
     # Init pose
     output = hl.smpl(betas.unsqueeze(0), translation[0].unsqueeze(0), pose_body[0, 3:].unsqueeze(0),  pose_body[0, :3].unsqueeze(0))
-    skinned = skinning(sim.fem.points.to(torch.float32), torch.tensor(sim.fem.mesh.point_data['weights']).to(device), output.tfs, inverse=False)
+    skinned = skinning(sim.points.to(torch.float32), torch.tensor(sim.mesh.point_data['weights']).to(device), output.tfs, inverse=False)
     sim.init_pose(skinned)
 
     sim.simulate_one_frame(fps)
 
-    for i in range(1, 100):
+    for i in range(1, translation.shape[0]):
         output = hl.smpl(betas.unsqueeze(0), translation[i].unsqueeze(0), pose_body[i, 3:].unsqueeze(0),  pose_body[i, :3].unsqueeze(0))
-        skinned = skinning(sim.fem.X_rest.to(torch.float32), torch.tensor(sim.fem.mesh.point_data['weights']).to(device), output.tfs, inverse=False)
-
+        skinned = skinning(sim.points.to(torch.float32), torch.tensor(sim.mesh.point_data['weights']).to(device), output.tfs, inverse=False)
         sim.set_pinned_points(skinned)
 
         sim.simulate_one_frame(fps)
-
 
         mesh = sim.fem.mesh.extract_surface()
         mesh.save(f'outputs/motion_soft/frame_{i}.obj')
