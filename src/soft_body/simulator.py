@@ -29,8 +29,7 @@ class Simulator():
         self.mesh.point_data['weights'] = weights.squeeze().detach().cpu()
 
         # Get all surface tetrahedra
-        surface = self.mesh.extract_surface()
-        surface_cell_ids = np.unique(surface.cell_data["vtkOriginalCellIds"])
+        self.surface = self.mesh.extract_surface()
 
         # Mark all points with lean tissue
         # self.mesh.point_data['is_lean'] = tissue_class == 1
@@ -51,7 +50,7 @@ class Simulator():
         # Remove all tetrahedra which has all points as lean tissue
         non_lean_tets = np.any(self.mesh.point_data['is_lean'][tet_indices] == False, axis=1).nonzero()
 
-        include_tets = np.unique(np.hstack([non_lean_tets[0], surface_cell_ids]))
+        # include_tets = np.unique(np.hstack([non_lean_tets[0], surface_cell_ids]))
 
         self.extract_mesh = self.mesh.extract_cells(non_lean_tets)
         self.extracted_point_ids = np.unique(self.extract_mesh.point_data['vtkOriginalPointIds'])
@@ -62,6 +61,7 @@ class Simulator():
 
         self.fem = FEM(
             self.extract_mesh,
+            self.surface,
             self.device,
             young=young,
             poisson=poisson,
@@ -92,10 +92,14 @@ class Simulator():
 
     def set_pinned_points(self, points):
         self.mesh.points = points.cpu().numpy()
+        old_points = self.fem.points.clone()
         
         points = points.to(torch.float64)
         extracted_points = points[self.extracted_point_ids]
         self.fem.points[self.fem.mesh.point_data['is_lean']] = extracted_points[self.fem.mesh.point_data['is_lean']]
+        fixed_dofs = (self.fem.mask).nonzero(as_tuple=True)[0] 
+
+        self.v[fixed_dofs] = points.reshape(-1)[fixed_dofs] - old_points.reshape(-1)[fixed_dofs]
 
     def _setup_plotter(self):
         self.plotter = pv.Plotter()
@@ -138,12 +142,13 @@ class Simulator():
 
     def plot_step(self):
         self.mesh.points[self.extracted_point_ids] = self.fem.points.detach().cpu().numpy()
+        # self.fem.mesh.points = self.fem.points.detach().cpu().numpy()
         self.actor.mapper.SetInputData(self.mesh)
 
-        vel_glyphs = self._make_velocity_glyphs(self.fem.points, self.v, self.fem.points_count, 0.00)
+        vel_glyphs = self._make_velocity_glyphs(self.fem.points, self.v, self.fem.points_count, 0.0)
         self.vel_actor.mapper.SetInputData(vel_glyphs)
 
-        f_glyphs = self._make_velocity_glyphs(self.fem.points, self.f, self.fem.points_count, 0.00)
+        f_glyphs = self._make_velocity_glyphs(self.fem.points, self.f, self.fem.points_count, 0.000)
         self.f_actor.mapper.SetInputData(f_glyphs)
 
         self.plotter.update()
@@ -164,6 +169,8 @@ class Simulator():
 
         if self.ground_y is not None:
             f_ext += self.fem.ground_penalty_force(self.f_g, self.v, self.ground_y, k=1000)
+
+        # f_ext += self.fem.self_collision_force_fast()
 
         rot = self.fem.calculate_R_shape_matching()
 

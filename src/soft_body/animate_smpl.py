@@ -48,6 +48,11 @@ def predict_occ_from_points(points, hl, data, device):
 
     return pred, weights
 
+def linspace(start, end, steps):
+    t = torch.linspace(0, 1, steps).to(start.device)
+
+    linspaces_2d = start.unsqueeze(1) + t.unsqueeze(0) * (end - start).unsqueeze(1)
+    return linspaces_2d.transpose(0, 1)
 
 @hydra.main(version_base=None, config_name='config', config_path='../../config')
 def main(config):
@@ -97,31 +102,57 @@ def main(config):
         device,
         pred_class,
         weights,
-        young=3e3,
-        poisson=0.45,
-        damping=0.1,
-        dt=0.002,
+        young=5e3,
+        poisson=0.42,
+        damping=0.01,
+        dt=0.001,
         plot=plot,
     )
 
     # Init pose
-    output = hl.smpl(betas.unsqueeze(0), translation[0].unsqueeze(0), pose_body[0, 3:].unsqueeze(0),  pose_body[0, :3].unsqueeze(0))
+    output = hl.smpl(betas.unsqueeze(0), translation[37].unsqueeze(0), pose_body[37, 3:].unsqueeze(0),  pose_body[37, :3].unsqueeze(0))
     skinned = skinning(sim.points.to(torch.float32), torch.tensor(sim.mesh.point_data['weights']).to(device), output.tfs, inverse=False)
     sim.init_pose(skinned)
 
-    sim.simulate_one_frame(fps)
+    # sim.simulate_one_frame(fps)
+    
+    # N = translation.shape[0]
+    N = 50
+    for i in range(37, 39):
+        trans = translation[i - 1]
+        pose = pose_body[i - 1]
 
-    for i in range(1, translation.shape[0]):
-        output = hl.smpl(betas.unsqueeze(0), translation[i].unsqueeze(0), pose_body[i, 3:].unsqueeze(0),  pose_body[i, :3].unsqueeze(0))
-        skinned = skinning(sim.points.to(torch.float32), torch.tensor(sim.mesh.point_data['weights']).to(device), output.tfs, inverse=False)
-        sim.set_pinned_points(skinned)
+        trans_next = translation[i]
+        pose_next = pose_body[i]
 
-        sim.simulate_one_frame(fps)
+        steps = 13
+        
+        trans_lin = linspace(trans, trans_next, steps)
+        pose_lin = linspace(pose, pose_next, steps)
 
-        mesh = sim.fem.mesh.extract_surface()
+        for j in range(steps - 1):
+            output = hl.smpl(betas.unsqueeze(0), trans_lin[j].unsqueeze(0), pose_lin[j, 3:].unsqueeze(0),  pose_lin[j, :3].unsqueeze(0))
+            skinned = skinning(sim.points.to(torch.float32), torch.tensor(sim.mesh.point_data['weights']).to(device), output.tfs, inverse=False)
+            sim.set_pinned_points(skinned)
+        
+            for _ in range(1):
+                sim.step()
+    
+        if sim.plot:
+            sim.plot_step()
+
+
+        mesh = sim.mesh.extract_surface()
         mesh.save(f'outputs/motion_soft/frame_{i}.obj')
         print(i)
-        
+
+    for _ in range(10):
+        # output = hl.smpl(betas.unsqueeze(0), translation[30].unsqueeze(0), pose_body[30, 3:].unsqueeze(0),  pose_body[30, :3].unsqueeze(0))
+        # skinned = skinning(sim.points.to(torch.float32), torch.tensor(sim.mesh.point_data['weights']).to(device), output.tfs, inverse=False)
+        sim.set_pinned_points(skinned)
+        sim.simulate_one_frame(fps)
+
+
     sim.plotter.close()
 
 

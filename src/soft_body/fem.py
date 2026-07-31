@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from pyvista import UnstructuredGrid
+from pyvista import PolyData, UnstructuredGrid
 import pyvista as pv
 from torch_sla import SparseTensor
 from torchtyping import TensorType
@@ -9,6 +9,7 @@ class FEM():
     def __init__(
             self,
             mesh: UnstructuredGrid, 
+            surface: PolyData,
             device: torch.device, 
             young: float = 3e5, 
             poisson: float = 0.35,
@@ -388,78 +389,111 @@ class FEM():
         f = f.reshape(-1)
         return f
     
-    # def self_collision_force(self, k=500.0):
-    #     displacement = self.points[None, :, :] - self.points[:, None, :]
-    #     points_idx = torch.arange(displacement.shape[0])
-        
-    #     dist = torch.norm(displacement, p=2, dim=-1)
-
-    #     # How much penetration (negative if there is)
-    #     penetration = torch.clamp(dist - self.collision, max=0.0)
-    #     penetration[points_idx, points_idx] = 0.0
-
-    #     direction = torch.where(penetration.unsqueeze(-1) < 0.0, displacement / dist.unsqueeze(-1).clamp(min=1e-8), torch.zeros_like(displacement))  # unit vector, i -> nearest j
-    #     f = torch.zeros(self.points_count, 3)
-
-    #     f = k * penetration.unsqueeze(-1) * direction
-    #     f = f.sum(dim=1)
-    #     f = f.reshape(-1) # (N * 3)
-    #     return f
-
-    def self_collision_force(self, k=500.0):
+    def _build_point_grid(self, cell_size, max_per_cell=16):
         """
-        Push out points that have penetrated the volume of a tet they are not
-        part of, detected via barycentric coordinates in the tet's *current*
-        (deformed) configuration.
+        Bucket self.points into a uniform spatial hash grid, fixed-capacity
+        per cell (GPU-friendly counting-sort trick, no Python loop over N).
+        Returns (unique_hash, table) where table[b] holds up to max_per_cell
+        point indices in the cell with hash unique_hash[b] (-1 = empty slot).
         """
         device = self.points.device
-        P = self.points  # (N,3)
-        tet_pts = P[self.tets]              # (T,4,3)
-        v0 = tet_pts[:, 0]                  # (T,3)
-        # Columns are edges (v1-v0, v2-v0, v3-v0) -- same convention as self.Dm_inv
-        Dm = (tet_pts[:, 1:, :] - v0.unsqueeze(1)).transpose(1, 2)  # (T,3,3)
+        N = self.points_count
+        P1, P2, P3 = 73856093, 19349663, 83492791  # Teschner et al. 2003 hash primes
 
-        # Skip degenerate/inverted tets rather than let inv() blow up on them.
-        detDm = torch.linalg.det(Dm)
-        valid = detDm.abs() > 1e-10
-        Dm_inv = torch.linalg.inv(Dm[valid])          # (T',3,3)
-        v0_v = v0[valid]                              # (T',3)
-        tet_verts_v = self.tets[valid]                # (T',4)
+        def cell_hash(c):
+            return (c[..., 0] * P1) ^ (c[..., 1] * P2) ^ (c[..., 2] * P3)
 
-        # p - v0 for every (point, tet) pair
-        rel = P.unsqueeze(1) - v0_v.unsqueeze(0)       # (N,T',3)
+        pc = torch.floor(self.points / cell_size).long()   # (N,3)
+        ph = cell_hash(pc)                                   # (N,)
 
-        # w1,w2,w3 = Dm_inv @ rel ; w0 = 1 - (w1+w2+w3)
-        w123 = torch.einsum('tij,ntj->nti', Dm_inv, rel)   # (N,T',3)
-        w0 = 1.0 - w123.sum(dim=-1)
-        bary = torch.cat([w0.unsqueeze(-1), w123], dim=-1)  # (N,T',4)
+        sort_idx = torch.argsort(ph)
+        sorted_hash = ph[sort_idx]
+        unique_hash, counts = torch.unique_consecutive(sorted_hash, return_counts=True)
+        offsets = torch.cat([torch.zeros(1, dtype=torch.long, device=device), counts.cumsum(0)])
 
-        # Inside the tet iff all 4 barycentric coords are >= 0 (they always sum to 1).
+        num_cells = unique_hash.shape[0]
+        bucket_id_sorted = torch.repeat_interleave(torch.arange(num_cells, device=device), counts)
+        rank_in_bucket = torch.arange(N, device=device) - offsets[bucket_id_sorted]
+
+        table = torch.full((num_cells, max_per_cell), -1, dtype=torch.long, device=device)
+        valid = rank_in_bucket < max_per_cell   # drop overflow beyond capacity
+        table[bucket_id_sorted[valid], rank_in_bucket[valid]] = sort_idx[valid]
+
+        return unique_hash, table, cell_hash
+
+    def self_collision_force_fast(self, k=500.0, cell_size=None, max_per_cell=16):
+        device = self.points.device
+        N = self.points_count
+
+        if cell_size is None:
+            edge_len = (self.points[self.tets[:, 1:]] - self.points[self.tets[:, 0:1]]).norm(dim=-1)
+            cell_size = max(edge_len.max().item() * 1.5, 1e-4)  # comfortably >= one tet's extent
+
+        unique_hash, table, cell_hash = self._build_point_grid(cell_size, max_per_cell)
+
+        tet_pts = self.points[self.tets]           # (T,4,3)
+        centroid = tet_pts.mean(dim=1)
+        tc = torch.floor(centroid / cell_size).long()   # (T,3)
+
+        offsets_27 = torch.tensor(
+            [(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)],
+            device=device,
+        )
+
+        cand_tets_list, cand_pts_list = [], []
+        for off in offsets_27:   # constant 27 iterations -- cheap, not per-N or per-T
+            nh = cell_hash(tc + off)                          # (T,)
+            idx = torch.searchsorted(unique_hash, nh).clamp(max=unique_hash.shape[0] - 1)
+            valid = unique_hash[idx] == nh
+            if not valid.any():
+                continue
+            tet_ids = torch.nonzero(valid, as_tuple=True)[0]
+            bucket_pts = table[idx[valid]]                     # (n_valid, max_per_cell)
+            tet_ids_exp = tet_ids.unsqueeze(1).expand(-1, max_per_cell).reshape(-1)
+            pt_ids_exp = bucket_pts.reshape(-1)
+            keep = pt_ids_exp >= 0
+            cand_tets_list.append(tet_ids_exp[keep])
+            cand_pts_list.append(pt_ids_exp[keep])
+
+        if not cand_tets_list:
+            return torch.zeros(3 * N, device=device, dtype=torch.float64)
+
+        cand_tets = torch.cat(cand_tets_list)
+        cand_pts = torch.cat(cand_pts_list)
+
+        # A point can't penetrate a tet it's a vertex of
+        is_member = (self.tets[cand_tets] == cand_pts.unsqueeze(1)).any(dim=1)
+        cand_tets, cand_pts = cand_tets[~is_member], cand_pts[~is_member]
+        if cand_tets.numel() == 0:
+            return torch.zeros(3 * N, device=device, dtype=torch.float64)
+
+        # ---- narrow phase: same barycentric point-in-tet test as before, candidates only ----
+        v0 = tet_pts[cand_tets, 0]
+        Dm = (tet_pts[cand_tets, 1:] - v0.unsqueeze(1)).transpose(1, 2)
+        ok = Dm.det().abs() > 1e-10
+        cand_tets, cand_pts, v0, Dm = cand_tets[ok], cand_pts[ok], v0[ok], Dm[ok]
+        if cand_tets.numel() == 0:
+            return torch.zeros(3 * N, device=device, dtype=torch.float64)
+
+        Dm_inv = torch.linalg.inv(Dm)
+        rel = self.points[cand_pts] - v0
+        w123 = torch.einsum('mij,mj->mi', Dm_inv, rel)
+        bary = torch.cat([(1.0 - w123.sum(-1)).unsqueeze(-1), w123], dim=-1)
         inside = (bary >= 0.0).all(dim=-1)
-
-        # A point can't penetrate a tet it's itself a vertex of.
-        point_ids = torch.arange(self.points_count, device=device).unsqueeze(1)   # (N,1)
-        is_member = (tet_verts_v.unsqueeze(0) == point_ids.unsqueeze(-1)).any(-1)  # (N,T')
-        inside = inside & (~is_member)
-
         if not inside.any():
-            return torch.zeros(3 * self.points_count, device=device, dtype=torch.float64)
+            return torch.zeros(3 * N, device=device, dtype=torch.float64)
 
-        # Push-out direction: away from the tet centroid, through the point.
-        # Cheap, robust approximation of "which face to exit through" without
-        # computing per-face normals explicitly.
-        centroid = tet_pts[valid].mean(dim=1)          # (T',3)
-        out_dir = P.unsqueeze(1) - centroid.unsqueeze(0)
+        cand_tets, cand_pts, bary = cand_tets[inside], cand_pts[inside], bary[inside]
+        centroid_in = tet_pts[cand_tets].mean(dim=1)
+        out_dir = self.points[cand_pts] - centroid_in
         out_dir = out_dir / out_dir.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-
-        # Depth proxy: how negative the most-violated barycentric coord is.
-        # Not a true metric distance, but scales sensibly with penetration.
         depth = torch.clamp(-bary.min(dim=-1).values, min=0.0)
-        depth = torch.where(inside, depth, torch.zeros_like(depth))
 
-        force = (k * depth.unsqueeze(-1) * out_dir).sum(dim=1)  # (N,3), summed over penetrated tets
-        return force.reshape(-1)
-        
+        f = torch.zeros(N, 3, device=device, dtype=torch.float64)
+        f = f.index_add_(0, cand_pts, k * depth.unsqueeze(-1) * out_dir)
+
+        print(f.unique())
+        return f.reshape(-1)
     
     def _calculate_lumped_mass(self, density=1000):
         tet_mass = density * self.V[:, 0, 0]  # (N,) mass per tet
@@ -504,3 +538,55 @@ class FEM():
         rhs_bc[fixed_dofs] = prescribed_value
 
         return K_bc, rhs_bc
+
+    # def _apply_dirichlet_bc(self, K, rhs, fixed_dofs, prescribed_value=0.0):
+    #     """
+    #     Enforce v[fixed_dofs] = prescribed_value:
+    #     - move the known fixed-DOF contribution out of the free rows' RHS
+    #     (rhs -= K @ v_p) before eliminating those rows/cols, so a moving
+    #     pin still exerts its correct elastic force on free neighbors
+    #     - zero out rows/cols for fixed DOFs (except diagonal, set to 1)
+    #     - set rhs[fixed_dofs] = prescribed_value
+
+    #     prescribed_value: scalar (broadcast to all fixed_dofs) or a tensor
+    #     matching fixed_dofs.shape, e.g. (target_pos - current_pos) / dt or
+    #     an analytic pin velocity.
+    #     """
+    #     K = K.coalesce()
+
+    #     fixed_set = torch.zeros(K.shape[0], dtype=torch.bool, device=K.device)
+    #     fixed_set[fixed_dofs] = True
+
+    #     # Build the full-length prescribed-velocity vector v_p (zero on free DOFs)
+    #     v_p = torch.zeros(K.shape[0], dtype=K.dtype, device=K.device)
+    #     v_p[fixed_dofs] = prescribed_value if torch.is_tensor(prescribed_value) \
+    #         else torch.full_like(v_p[fixed_dofs], prescribed_value)
+
+    #     # Move the known contribution to the RHS before eliminating -- this is
+    #     # the step the zero-only version skipped (harmless when v_p is all
+    #     # zero, wrong the moment a pin actually moves).
+    #     Kv_p = torch.sparse.mm(K, v_p.unsqueeze(1)).squeeze(1)
+    #     rhs_bc = rhs.clone() - Kv_p
+
+    #     indices = K.indices()
+    #     values = K.values()
+
+    #     row_fixed = fixed_set[indices[0]]
+    #     col_fixed = fixed_set[indices[1]]
+
+    #     # Zero any entry where either the row or column is a fixed DOF...
+    #     keep = ~(row_fixed | col_fixed)
+    #     new_values = torch.where(keep, values, torch.zeros_like(values))
+
+    #     K_bc = torch.sparse_coo_tensor(indices, new_values, K.shape).coalesce()
+
+    #     # ...then add identity entries back on the diagonal for fixed DOFs
+    #     diag_idx = fixed_dofs
+    #     diag_indices = torch.stack([diag_idx, diag_idx])
+    #     diag_values = torch.ones(diag_idx.shape[0], device=K.device, dtype=K.dtype)
+
+    #     K_bc = (K_bc + torch.sparse_coo_tensor(diag_indices, diag_values, K.shape)).coalesce()
+
+    #     rhs_bc[fixed_dofs] = v_p[fixed_dofs]
+
+    #     return K_bc, rhs_bc
