@@ -110,7 +110,7 @@ def main(config):
     )
 
     # Init pose
-    output = hl.smpl(betas.unsqueeze(0), translation[37].unsqueeze(0), pose_body[37, 3:].unsqueeze(0),  pose_body[37, :3].unsqueeze(0))
+    output = hl.smpl(betas.unsqueeze(0), translation[0].unsqueeze(0), pose_body[0, 3:].unsqueeze(0),  pose_body[0, :3].unsqueeze(0))
     skinned = skinning(sim.points.to(torch.float32), torch.tensor(sim.mesh.point_data['weights']).to(device), output.tfs, inverse=False)
     sim.init_pose(skinned)
 
@@ -118,7 +118,7 @@ def main(config):
     
     # N = translation.shape[0]
     N = 50
-    for i in range(37, 39):
+    for i in range(1, 50):
         trans = translation[i - 1]
         pose = pose_body[i - 1]
 

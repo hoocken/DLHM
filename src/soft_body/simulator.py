@@ -1,3 +1,4 @@
+from collections import defaultdict
 import pickle
 import numpy as np
 
@@ -28,9 +29,6 @@ class Simulator():
         # Set point weights
         self.mesh.point_data['weights'] = weights.squeeze().detach().cpu()
 
-        # Get all surface tetrahedra
-        self.surface = self.mesh.extract_surface()
-
         # Mark all points with lean tissue
         # self.mesh.point_data['is_lean'] = tissue_class == 1
         self.weights = weights.squeeze()
@@ -46,11 +44,8 @@ class Simulator():
         self.mesh.point_data['is_lean'] = (tissue_class == 1) | (tissue_class == 3)
         self.mesh.point_data['is_lean'][mask.cpu()] = True
 
-
         # Remove all tetrahedra which has all points as lean tissue
         non_lean_tets = np.any(self.mesh.point_data['is_lean'][tet_indices] == False, axis=1).nonzero()
-
-        # include_tets = np.unique(np.hstack([non_lean_tets[0], surface_cell_ids]))
 
         self.extract_mesh = self.mesh.extract_cells(non_lean_tets)
         self.extracted_point_ids = np.unique(self.extract_mesh.point_data['vtkOriginalPointIds'])
@@ -59,9 +54,26 @@ class Simulator():
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+        # Get all surface points
+        self.surface_cell_ids = self.surface.cell_data['vtkOriginalCellIds']
+        self.surface = self.mesh.extract_surface()
+        self.surface_point_ids = self.surface.point_data['vtkOriginalPointIds']
+        extract_in_surface = np.isin(self.extracted_point_ids, self.surface_point_ids) # All points in extracted mesh which correspond to the surface
+
+        map = list(self.extracted_point_ids)
+        inv_map = {item: num for num, item in enumerate(map)}
+        triangle_indices = self.surface.faces.reshape((-1, 4))[:, 1:] # Point indices that make up a triangle (based on surface mesh)
+
+        extract_point_surface = extract_in_surface.nonzero()
+        extract_face_surface = self.surface_point_ids[triangle_indices] # Get all faces with original point ids from mesh
+        v_map = np.vectorize(lambda x: inv_map.get(x, -1))
+        extract_face_surface = v_map(extract_face_surface) # Map faces from original point ids to indices of extracted mesh
+        extract_face_surface = extract_face_surface[np.all(extract_face_surface != -1, axis=1)] # Remove all non-existent nodes in extracted mesh
+
         self.fem = FEM(
             self.extract_mesh,
-            self.surface,
+            extract_point_surface,
+            extract_face_surface,
             self.device,
             young=young,
             poisson=poisson,
