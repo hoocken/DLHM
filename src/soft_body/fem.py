@@ -7,37 +7,10 @@ from torchtyping import TensorType
 from collections import defaultdict
 from torch.func import vmap, jacrev, hessian
 
-def _dihedral_angle_flat(x_flat):
-    """x_flat = concat([x0, x1, x2, x3]), 12-vector: edge (x0,x1), apexes x2,x3."""
-    x0, x1, x2, x3 = x_flat[0:3], x_flat[3:6], x_flat[6:9], x_flat[9:12]
-    e = x1 - x0
-    e_n = e / e.norm()
-    n1 = torch.linalg.cross(x2 - x0, e)
-    n1 = n1 / n1.norm()
-    n2 = torch.linalg.cross(e, x3 - x0)
-    n2 = n2 / n2.norm()
-    cos_t = (n1 * n2).sum()
-    sin_t = (torch.linalg.cross(n1, n2) * e_n).sum()
-    return torch.atan2(sin_t, cos_t)
-
-
-def _stretch_energy_flat(x_flat, l_bar):
-    """x_flat = concat([x_i, x_j]), 6-vector. Eq. 6."""
-    x_i, x_j = x_flat[0:3], x_flat[3:6]
-    l = (x_i - x_j).norm()
-    return 0.5 / l_bar**2 * (l - l_bar) ** 2
-
-
-def _bend_energy_flat(x_flat, l_bar, A_bar, theta_bar):
-    """x_flat = concat([x0,x1,x2,x3]), 12-vector. Eq. 5."""
-    theta = _dihedral_angle_flat(x_flat)
-    return 0.5 * (l_bar**2 / A_bar) * (theta - theta_bar) ** 2
-
 class FEM():
     def __init__(
             self,
             mesh: UnstructuredGrid, 
-            surface_tets,
             device: torch.device, 
             young_fat: float = 3e3, 
             young_skin: float = 4e4,
@@ -53,53 +26,7 @@ class FEM():
         tet_indices = mesh.extract_cells_by_type(pv.CellType.TETRA).cells.reshape(-1, 5)[:, 1:] # (N, 4)
         self.tets = torch.from_numpy(tet_indices.copy()).to(self.device)
 
-        # Surfaces
-        self.surface_points = surface_points
-        self.surface_faces = surface_faces
-
-        edges = self._calculate_triangles_sharing_edges(self.surface_faces)
-        self.edge_idx = torch.tensor(list(edges.keys())).to(self.device)
-        self.adj_triangles = torch.tensor(list(edges.values())).to(self.device)
-
-        self.rest_normals = self._calculate_normals(self.points)
-        self.rest_dihedral_angles = self._calculate_dihedral(self.rest_normals, self.adj_triangles)
-        self.rest_edge_lengths = self._calculate_edge_length(self.points)
-        self.rest_areas = self._calculate_triangle_areas(self.X_rest)
-        self.edge_apex = self._calculate_edge_apex()   # (Ne,2) long: opposite-vertex per adjacent tri
-
-        # Replace the arccos-based rest dihedral with the atan2-based one, computed
-        # the same way it'll be computed every step -- consistency matters here,
-        # since (theta - theta_bar) is compared directly in the bend energy.
-        self.rest_dihedral_angles = self._calculate_dihedral_batched(self.X_rest)
-
-        self.rest_A_bar = (self.rest_areas[self.adj_triangles[:, 0]]
-                            + self.rest_areas[self.adj_triangles[:, 1]]) / 3.0
-
-        # Scatter indices for the skin energies, precomputed once -- same pattern
-        # as self.row/self.col for the tets.
-        Ne = self.edge_idx.shape[0]
-
-        stretch_dof = torch.stack([
-            self.edge_idx[:, 0]*3, self.edge_idx[:, 0]*3+1, self.edge_idx[:, 0]*3+2,
-            self.edge_idx[:, 1]*3, self.edge_idx[:, 1]*3+1, self.edge_idx[:, 1]*3+2,
-        ], dim=-1)  # (Ne,6)
-        self.stretch_dof = stretch_dof
-        self.stretch_row = stretch_dof.unsqueeze(2).expand(-1, -1, 6).reshape(-1)
-        self.stretch_col = stretch_dof.unsqueeze(1).expand(-1, 6, -1).reshape(-1)
-
-        bend_dof = torch.stack([
-            self.edge_idx[:, 0]*3, self.edge_idx[:, 0]*3+1, self.edge_idx[:, 0]*3+2,
-            self.edge_idx[:, 1]*3, self.edge_idx[:, 1]*3+1, self.edge_idx[:, 1]*3+2,
-            self.edge_apex[:, 0]*3, self.edge_apex[:, 0]*3+1, self.edge_apex[:, 0]*3+2,
-            self.edge_apex[:, 1]*3, self.edge_apex[:, 1]*3+1, self.edge_apex[:, 1]*3+2,
-        ], dim=-1)  # (Ne,12)
-        self.bend_dof = bend_dof
-        self.bend_row = bend_dof.unsqueeze(2).expand(-1, -1, 12).reshape(-1)
-        self.bend_col = bend_dof.unsqueeze(1).expand(-1, 12, -1).reshape(-1)
-
-        # Paper defaults, Section 3.2 -- expose as attributes so they're tunable
-        self.k_s = 3e-2
-        self.k_b = 2e-3
+        self.surface_mask = torch.from_numpy(self.mesh.cell_data['is_surface'])
 
         self.points_count = self.points.shape[0]
         self.tets_count = self.tets.shape[0]
@@ -118,7 +45,7 @@ class FEM():
         self.E_skin = self._calculate_E(young_skin, poisson)
 
         self.E = self.E_fat
-        self.E[]
+        self.E[self.surface_mask] = self.E_skin[self.surface_mask]
 
         # Per-element stiffness matrix
         self.Ke = self.V * (self.B.transpose(1, 2) @ self.E @ self.B)
@@ -256,127 +183,6 @@ class FEM():
         f0 = f0.index_add_(0, self.dof.reshape(-1), f0_local.reshape(-1))
         return f0
 
-    def _calculate_triangle_areas(self, points):
-        tri_pts = points[self.surface_faces]        # (F,3,3)
-        v1 = tri_pts[:, 1] - tri_pts[:, 0]
-        v2 = tri_pts[:, 2] - tri_pts[:, 0]
-        return 0.5 * torch.linalg.cross(v1, v2, dim=-1).norm(dim=-1)
-
-    def _calculate_edge_apex(self):
-        """
-        One-time setup cost (Python loop over Ne edges, not per simulation
-        step): for each edge with two adjacent triangles, find each
-        triangle's "apex" -- the vertex not on the edge -- giving the
-        four-point stencil [i, j, k, l] the bending energy needs.
-        """
-        faces = self.surface_faces
-        apexes = []
-        for (i, j), (t0, t1) in zip(self.edge_idx.tolist(), self.adj_triangles.tolist()):
-            edge_set = {i, j}
-            k = [v for v in faces[t0].tolist() if v not in edge_set][0]
-            l = [v for v in faces[t1].tolist() if v not in edge_set][0]
-            apexes.append((k, l))
-        return torch.tensor(apexes, device=self.device, dtype=torch.long)
-
-    def _calculate_dihedral_batched(self, points):
-        x_flat = torch.cat([
-            points[self.edge_idx[:, 0]], points[self.edge_idx[:, 1]],
-            points[self.edge_apex[:, 0]], points[self.edge_apex[:, 1]],
-        ], dim=-1)  # (Ne,12)
-        return vmap(_dihedral_angle_flat)(x_flat)
-
-    def _assemble_skin_forces(self):
-        """
-        Nonlinear stretch (Eq. 6) + bend (Eq. 5) energy, differentiated fresh
-        every call -- unlike Ke, these aren't constant, so gradient/Hessian
-        have to be re-evaluated from the current configuration each step,
-        same principle as calculate_R_* being recomputed every step.
-        """
-        n = 3 * self.points_count
-
-        # ---- stretch ----
-        x_s = torch.cat([self.points[self.edge_idx[:, 0]],
-                        self.points[self.edge_idx[:, 1]]], dim=-1)  # (Ne,6)
-        grad_s = vmap(jacrev(_stretch_energy_flat))(x_s, self.rest_edge_lengths)   # (Ne,6)
-        hess_s = vmap(hessian(_stretch_energy_flat))(x_s, self.rest_edge_lengths)  # (Ne,6,6)
-
-        f_skin = torch.zeros(n, device=self.device, dtype=torch.float64)
-        f_skin = f_skin.index_add_(0, self.stretch_dof.reshape(-1),
-                                    (-self.k_s * grad_s).reshape(-1))
-
-        K_skin = torch.sparse_coo_tensor(
-            indices=torch.stack([self.stretch_row, self.stretch_col]),
-            values=(self.k_s * hess_s).reshape(-1),
-            size=(n, n),
-        ).coalesce()
-
-        # ---- bend ----
-        x_b = torch.cat([
-            self.points[self.edge_idx[:, 0]], self.points[self.edge_idx[:, 1]],
-            self.points[self.edge_apex[:, 0]], self.points[self.edge_apex[:, 1]],
-        ], dim=-1)  # (Ne,12)
-        grad_b = vmap(jacrev(_bend_energy_flat))(
-            x_b, self.rest_edge_lengths, self.rest_A_bar, self.rest_dihedral_angles)   # (Ne,12)
-        hess_b = vmap(hessian(_bend_energy_flat))(
-            x_b, self.rest_edge_lengths, self.rest_A_bar, self.rest_dihedral_angles)   # (Ne,12,12)
-
-        # Bending's Hessian isn't guaranteed PSD (this is the same caveat as
-        # with rotation extraction earlier: an indefinite Hessian can make
-        # the implicit solve step in a non-descent direction). Eigen-project
-        # onto the PSD cone per element before it enters the global system --
-        # this is exactly what Teran et al.'s quasi-static Newton (cited by
-        # the paper for their own solve) does.
-        eigval, eigvec = torch.linalg.eigh(hess_b)
-        eigval = eigval.clamp(min=0.0)
-        hess_b = eigvec @ torch.diag_embed(eigval) @ eigvec.transpose(-2, -1)
-
-        f_skin = f_skin.index_add_(0, self.bend_dof.reshape(-1),
-                                    (-self.k_b * grad_b).reshape(-1))
-
-        K_bend = torch.sparse_coo_tensor(
-            indices=torch.stack([self.bend_row, self.bend_col]),
-            values=(self.k_b * hess_b).reshape(-1),
-            size=(n, n),
-        ).coalesce()
-
-        K_skin = (K_skin + K_bend).coalesce()
-        return K_skin, f_skin
-
-    def _calculate_triangles_sharing_edges(self, faces):
-        edge_to_tris = defaultdict(list)
-        for tri_id, tri in enumerate(faces):
-            for e in [(tri[0], tri[1]), (tri[1], tri[2]), (tri[2], tri[0])]:
-                edge = tuple(sorted(e))          # undirected edge, order-independent
-                edge_to_tris[edge].append(tri_id)
-
-        edge_to_tris_2 = defaultdict(list)
-
-        for e, tri in edge_to_tris.items():
-            if len(tri) == 2:
-                edge_to_tris_2[e] = tri
-
-        return edge_to_tris_2
-
-    def _calculate_normals(self, points):
-        triangle_points = points[self.surface_faces]
-        triangle_vectors = triangle_points[:, 1:, :] - triangle_points[:, 0:1, :] # (N, 2, 3)
-        normals = torch.linalg.cross(triangle_vectors[:, 0, :], triangle_vectors[:, 1, :], dim=-1) # (N, 3)
-        return normals / torch.norm(normals, dim=1)[:, None]
-
-    def _calculate_dihedral(self, normals, adjacency):
-        first_vec = normals[adjacency[:, 0]]
-        second_vec = normals[adjacency[:, 1]]
-
-        dot_product = torch.sum(first_vec * second_vec, dim=1)
-        return torch.arccos(dot_product)
-
-    def _calculate_edge_length(self, points):
-        print(points.shape, self.edge_idx.max())
-        edge_points = points[self.edge_idx]
-        displacement = edge_points[:, 1, :] - edge_points[:, 0, :]
-        edge_length = torch.norm(displacement, dim=1)
-        return edge_length
-
     def solve_v_next(self, v: TensorType["points"], rotation, f_ext, dt):
         """
         Calculate v_{t+1} with Euler implicit integration by solving this equation:
@@ -392,8 +198,6 @@ class FEM():
             dt: float, Timestep
         """
         rotation = rotation.to(self.device)
-        # print("rotation", rotation[tetra])
-        # print("K_e", self.Ke[tetra])
         rotation = self._block_diag_rotation(rotation)
 
         K_p = self._assemble_Kp(rotation)
@@ -411,7 +215,6 @@ class FEM():
         f_ext = f_ext.to(self.device)
         v = v.to(self.device)
         forces = K_p @ self.points.reshape(-1) - f0 - f_ext
-        # forces[torch.abs(forces) < 1e-8] = 0.0
         right_side = self.M * v - dt * (forces)
 
         fixed_dofs = (self.mask).nonzero(as_tuple=True)[0] 

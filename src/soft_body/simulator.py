@@ -13,7 +13,8 @@ class Simulator():
                  device: torch.device, 
                  tissue_class: np.ndarray,
                  weights: np.ndarray,
-                 young=5e4, 
+                 young_fat=5e3,
+                 young_skin=4e4, 
                  poisson=0.43, 
                  density=1e3, 
                  damping=0.9,
@@ -23,16 +24,22 @@ class Simulator():
                  plot=False, 
                 ):
         self.mesh = mesh
-        self.points = torch.from_numpy(mesh.points).to(device, torch.float64)
+        self.rest_points = torch.from_numpy(mesh.points).to(device, torch.float64)
         tet_indices = mesh.extract_cells_by_type(pv.CellType.TETRA).cells.reshape(-1, 5)[:, 1:]
 
         # Set point weights
         self.mesh.point_data['weights'] = weights.squeeze().detach().cpu()
 
+        # Get surface
+        self.surface = self.mesh.extract_surface()
+        surface_cell_ids = np.unique(self.surface.cell_data['vtkOriginalCellIds'])
+        self.mesh.cell_data['is_surface'] = False # Mark tets on surface
+        self.mesh.cell_data['is_surface'][surface_cell_ids] = True
+
         # Mark all points with lean tissue
         # self.mesh.point_data['is_lean'] = tissue_class == 1
         self.weights = weights.squeeze()
-        self.part_ids = torch.argmax(self.weights , axis=1)
+        self.part_ids = torch.argmax(self.weights, axis=1)
         # Pin hands, feet, and head
         mask = (self.part_ids >= 20) | \
                 (self.part_ids == 7) | \
@@ -54,28 +61,11 @@ class Simulator():
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        # Get all surface points
-        self.surface_cell_ids = self.surface.cell_data['vtkOriginalCellIds']
-        self.surface = self.mesh.extract_surface()
-        self.surface_point_ids = self.surface.point_data['vtkOriginalPointIds']
-        extract_in_surface = np.isin(self.extracted_point_ids, self.surface_point_ids) # All points in extracted mesh which correspond to the surface
-
-        map = list(self.extracted_point_ids)
-        inv_map = {item: num for num, item in enumerate(map)}
-        triangle_indices = self.surface.faces.reshape((-1, 4))[:, 1:] # Point indices that make up a triangle (based on surface mesh)
-
-        extract_point_surface = extract_in_surface.nonzero()
-        extract_face_surface = self.surface_point_ids[triangle_indices] # Get all faces with original point ids from mesh
-        v_map = np.vectorize(lambda x: inv_map.get(x, -1))
-        extract_face_surface = v_map(extract_face_surface) # Map faces from original point ids to indices of extracted mesh
-        extract_face_surface = extract_face_surface[np.all(extract_face_surface != -1, axis=1)] # Remove all non-existent nodes in extracted mesh
-
         self.fem = FEM(
             self.extract_mesh,
-            extract_point_surface,
-            extract_face_surface,
             self.device,
-            young=young,
+            young_fat=young_fat,
+            young_skin=young_skin,
             poisson=poisson,
             density=density,
             damping=damping,
@@ -101,6 +91,22 @@ class Simulator():
 
         if self.plot:
             self._setup_plotter()
+
+    def get_corresponding_smpl(self, smpl_points):
+        smpl_points = smpl_points.squeeze()
+        surface_points = torch.from_numpy(self.surface.points).to(self.device) # (M)
+
+        disp = smpl_points[:, None, :] - surface_points[None, :, :]
+        dist = torch.norm(disp, p=2, dim=-1) # (N, M)
+        _, min_idx = dist.min(dim=1) # min target for a fixed x; (N)
+
+        orig_id = self.surface.point_data['vtkOriginalPointIds']
+        return orig_id[min_idx.cpu()]
+
+    def get_3d_displacements(self, points):
+        mesh_points = torch.from_numpy(self.mesh.points).to(self.device)
+        disp = torch.norm(mesh_points - points, dim=-1)
+        return disp
 
     def set_pinned_points(self, points):
         self.mesh.points = points.cpu().numpy()
@@ -153,8 +159,6 @@ class Simulator():
         self.plotter.close()
 
     def plot_step(self):
-        self.mesh.points[self.extracted_point_ids] = self.fem.points.detach().cpu().numpy()
-        # self.fem.mesh.points = self.fem.points.detach().cpu().numpy()
         self.actor.mapper.SetInputData(self.mesh)
 
         vel_glyphs = self._make_velocity_glyphs(self.fem.points, self.v, self.fem.points_count, 0.0)
@@ -189,6 +193,9 @@ class Simulator():
         self.v, self.f = self.fem.solve_v_next(self.v, rot, f_ext, self.dt)
 
         self.fem.solve_x_next(self.v, self.dt)
+
+        # Update all mesh points
+        self.mesh.points[self.extracted_point_ids] = self.fem.points.detach().cpu().numpy()
 
     def simulate_one_frame(self, frame_rate=30):
         num_substeps = int((1 / frame_rate) // self.dt)
