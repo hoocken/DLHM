@@ -25,7 +25,7 @@ class Simulator():
                 ):
         self.mesh = mesh
         self.rest_points = torch.from_numpy(mesh.points).to(device, torch.float64)
-        tet_indices = mesh.extract_cells_by_type(pv.CellType.TETRA).cells.reshape(-1, 5)[:, 1:]
+        self.tet_indices = mesh.extract_cells_by_type(pv.CellType.TETRA).cells.reshape(-1, 5)[:, 1:]
 
         # Set point weights
         self.mesh.point_data['weights'] = weights.squeeze().detach().cpu()
@@ -52,7 +52,7 @@ class Simulator():
         self.mesh.point_data['is_lean'][mask.cpu()] = True
 
         # Remove all tetrahedra which has all points as lean tissue
-        non_lean_tets = np.any(self.mesh.point_data['is_lean'][tet_indices] == False, axis=1).nonzero()
+        non_lean_tets = np.any(self.mesh.point_data['is_lean'][self.tet_indices] == False, axis=1).nonzero()
 
         self.extract_mesh = self.mesh.extract_cells(non_lean_tets)
         self.extracted_point_ids = np.unique(self.extract_mesh.point_data['vtkOriginalPointIds'])
@@ -88,7 +88,7 @@ class Simulator():
         self.mesh.points = points.cpu().numpy()
 
         self.fem.points = points[self.extracted_point_ids].to(torch.float64)
-
+        self.mesh.point_data['displacement'] = 0.0
         if self.plot:
             self._setup_plotter()
 
@@ -104,9 +104,27 @@ class Simulator():
         return orig_id[min_idx.cpu()]
 
     def get_3d_displacements(self, points):
-        mesh_points = torch.from_numpy(self.mesh.points).to(self.device)
-        disp = torch.norm(mesh_points - points, dim=-1)
+        points = points[self.extracted_point_ids].to(torch.float64)
+
+        mask = ~self.fem.mesh.point_data['is_lean']
+        points = points[mask]
+        fem_points = self.fem.points[mask]
+        disp = torch.norm(fem_points - points, dim=-1)
+
+        orig_id = self.extracted_point_ids[mask]
+
+        self.mesh.point_data['displacement'][orig_id] = disp.cpu() * 1.0
+
         return disp
+
+    def calculate_volume(self, template_points):
+        Dm = self.fem.calculate_Dm(self.fem.points)
+        V = self.fem.calculate_V(Dm)
+
+        tet_points = template_points[self.tet_indices]
+        Dm_template = tet_points[:, 1:, :] - tet_points[:, 0:1, :]
+        V_template = self.fem.calculate_V(Dm_template)
+        return V, V_template
 
     def set_pinned_points(self, points):
         self.mesh.points = points.cpu().numpy()
@@ -124,7 +142,9 @@ class Simulator():
         self.plotter.open_gif("mesh_animation.gif")
 
         self.actor = self.plotter.add_mesh(
-            self.mesh, color="coral", 
+            self.mesh, cmap="YlOrRd", 
+            clim=[0.0, 0.04],
+            scalars="displacement",
             # show_edges=True, 
             smooth_shading=True, 
             style="surface", 

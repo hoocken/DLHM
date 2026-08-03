@@ -31,8 +31,8 @@ class FEM():
         self.points_count = self.points.shape[0]
         self.tets_count = self.tets.shape[0]
 
-        self.Dm = self._calculate_Dm(self.X_rest)
-        self.V = torch.abs(torch.linalg.det(self.Dm))/ 6
+        self.Dm = self.calculate_Dm(self.X_rest)
+        self.V = self.calculate_V(self.Dm)
         self.Dm_inv = torch.linalg.inv(self.Dm.transpose(1, 2))
 
         # Volume of tets
@@ -70,6 +70,9 @@ class FEM():
 
         self.weights = torch.from_numpy(self.mesh.point_data['weights']).to(self.device)
 
+    def calculate_V(self, Dm):
+        return torch.abs(torch.linalg.det(Dm))/ 6
+
     def _lame_parameters(self, E, nu):
         lam = (E * nu) / ((1 + nu) * (1 - 2 * nu))
         mu = E / (2 * (1 + nu))
@@ -92,7 +95,7 @@ class FEM():
         E = E.unsqueeze(0).expand(self.tets_count, -1, -1)
         return E
     
-    def _calculate_Dm(self, points):
+    def calculate_Dm(self, points):
         """
         Calculate edge matrix where each row is [x1 - x0, x2 - x0, x3 - x0]
         """

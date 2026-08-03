@@ -72,6 +72,6 @@ class Tetrahedralize():
 
 
 if __name__ == "__main__":
-    tet = Tetrahedralize("outputs/motion/smpl_mesh.obj")
+    tet = Tetrahedralize("outputs/hit_best/smpl_mesh.obj") # hit_best if using soft tissue
     tet.create_tetrahedra_mesh()
     # tet.plot()
