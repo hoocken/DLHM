@@ -5,7 +5,7 @@ defaults:
 
 pose:
   data: 'data/motion/Box_3_poses.npz'
-
+  gender: female
 
 model:
   base_model: data/models
@@ -25,6 +25,14 @@ model:
     threshold: 1e-1
   sigma: 2
   save_model: True
+
+animate:
+  data: data/motion/50020_jiggle_on_toes_poses.npz
+  path: outputs/tet_mesh/tet_mesh.vtu
+  exp_name: hit_female
+  target_body: outputs/fit/smpl_fit_params.pkl
+  motion_gt: /home/anthony/Projects/Dyna/50020_jiggle_on_toes
+  plot: True
 
 hydra:
   run:
