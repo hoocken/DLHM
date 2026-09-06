@@ -22,6 +22,7 @@ class Simulator():
                  ground_y_offset=None,
                  dt=0.002,
                  plot=False, 
+                 output_folder=None,
                 ):
         self.mesh = mesh
         self.rest_points = torch.from_numpy(mesh.points).to(device, torch.float64)
@@ -82,6 +83,7 @@ class Simulator():
 
         self.plot = plot
         self.dt = dt
+        self.output_folder = output_folder
 
     def init_pose(self, points):
         """Only plot after initializing pose."""
@@ -139,7 +141,7 @@ class Simulator():
 
     def _setup_plotter(self):
         self.plotter = pv.Plotter()
-        self.plotter.open_gif("mesh_animation.gif")
+        self.plotter.open_gif(f"{self.output_folder}/mesh_animation.gif")
 
         self.actor = self.plotter.add_mesh(
             self.mesh, cmap="YlOrRd", 
@@ -205,8 +207,6 @@ class Simulator():
 
         if self.ground_y is not None:
             f_ext += self.fem.ground_penalty_force(self.f_g, self.v, self.ground_y, k=1000)
-
-        # f_ext += self.fem.self_collision_force_fast()
 
         rot = self.fem.calculate_R_shape_matching()
 

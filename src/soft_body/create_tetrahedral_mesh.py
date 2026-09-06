@@ -6,8 +6,6 @@ import pickle
 
 import numpy as np
 import pyvista as pv
-import trimesh
-import pytetwild
 import tetgen
 import pymeshfix
 

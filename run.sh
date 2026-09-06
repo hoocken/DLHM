@@ -6,7 +6,8 @@ print_help() {
     echo ""
     echo "Options:"
     echo "  -h, --help    Show this help message and exit"
-    echo "  -m       Input motion to animate segmentations"
+    echo "  -m            Input motion to animate segmentations"
+    echo "  -n            Skip HIT segmentation"    
     echo ""
     echo "Example:"
     echo "  $0 data/input/tr_scan_066.ply female --motion data/motion/Jog_3_poses.npz"
@@ -18,36 +19,58 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     exit 0
 fi
 
-if [ "$#" -lt 2 ]; then
+MOTION=""
+HIT=true
+POSITIONAL=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -m)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: -m requires a value." >&2
+                print_help
+                exit 1
+            fi
+            MOTION="$2"
+            shift 2
+            ;;
+        -n)
+            HIT=false
+            shift
+            ;;
+        -h|--help)
+            print_help
+            exit 0
+            ;;
+        --)
+            shift
+            POSITIONAL+=("$@")
+            break
+            ;;
+        -*)
+            echo "Invalid option: $1" >&2
+            print_help
+            exit 1
+            ;;
+        *)
+            POSITIONAL+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ ${#POSITIONAL[@]} -lt 2 ]]; then
     echo "Error: Two arguments are required." >&2
     print_help
     exit 1
 fi
 
-MOTION=""
-while getopts "m:" opt; do
-    case ${opt} in
-        m )
-            MOTION=$OPTARG
-            ;;
-        h )
-            print_help
-            ;;
-        \? )
-            echo "Invalid option: -$OPTARG" 1>&2
-            print_help
-            ;;
-        : )
-            echo "Invalid option: -$OPTARG requires an argument" 1>&2
-            print_help
-            ;;
-    esac
-done
+INPUT="${POSITIONAL[0]}"
+GENDER="${POSITIONAL[1]}"
 
-# Set model and experiment to male or female
-if [[ "$2" == "male" ]]; then
+if [[ "$GENDER" == "male" ]]; then
     EXPERIMENT_NAME="hit_male"
-elif [[ "$2" == "female" ]]; then
+elif [[ "$GENDER" == "female" ]]; then
     EXPERIMENT_NAME="hit_female"
 else
     echo "Error: Only 'male' or 'female' is allowed." >&2
@@ -77,7 +100,7 @@ conda activate "$HUMAN3D_ENV_NAME"
 echo "---------------------------------------------------"
 echo "|                  SEGMENTATION                   |"
 echo "---------------------------------------------------"
-python lib/human3d/infer_mhbps.py segfit.data_path=$1 general.checkpoint=data/ckpts/human3d.ckpt
+python lib/human3d/infer_mhbps.py segfit.data_path="$INPUT" general.checkpoint=data/ckpts/human3d.ckpt
 
 conda deactivate
 
@@ -90,14 +113,18 @@ echo "---------------------------------------------------"
 
 # Run fitting
 conda activate "$HIT_ENV_NAME"
-python src/fit/fit.py model.gender=$2
+python src/fit/fit.py model.gender="$GENDER"
+
+if [[ "$HIT" = false ]] ; then
+    exit 0
+fi
 
 echo "---------------------------------------------------"
 echo "|                      HIT                        |"
 echo "---------------------------------------------------"
 
 # Run HIT
-python lib/HIT/demos/infer_smpl.py --exp_name=$EXPERIMENT_NAME --to_infer smpl_file --target_body outputs/fit/smpl_fit_params.pkl
+python lib/HIT/demos/infer_smpl.py --exp_name="$EXPERIMENT_NAME" --to_infer smpl_file --target_body outputs/fit/smpl_fit_params.pkl
 
 if [[ "$MOTION" == "" ]]; then
     exit 0
@@ -109,6 +136,6 @@ echo "|                     MOTION                      |"
 echo "---------------------------------------------------"
 
 # Pose HIT
-python src/pose_extraction/pose_hit.py pose.data=$MOTION
+python src/pose_extraction/pose_hit.py pose.data="$MOTION"
 
 conda deactivate

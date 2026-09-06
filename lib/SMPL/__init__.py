@@ -1,1 +1,0 @@
-from .SMPL import SMPL

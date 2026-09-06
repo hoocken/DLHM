@@ -64,7 +64,7 @@ def get_points_from_obj(file_path):
     mesh.apply_transform(matrix)
     return torch.from_numpy(mesh.vertices)
 
-def line_plot(list_values, title, y_title, labels, colors=['black']):
+def line_plot(list_values, title, y_title, labels, colors=['black'], output_folder='outputs/motion_soft'):
     x = np.arange(len(list_values[0]))
     for i in range(len(list_values)):
         plt.plot(x, list_values[i], label=labels[i], color=colors[i], linestyle='-', linewidth=2)
@@ -76,7 +76,7 @@ def line_plot(list_values, title, y_title, labels, colors=['black']):
 
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 
-    plt.savefig(f'{title}.png', dpi=300, bbox_inches='tight')
+    plt.savefig(f'{output_folder}/{title}.png', dpi=300, bbox_inches='tight')
     plt.close()
 
 @hydra.main(version_base=None, config_name='config', config_path='../../config')
@@ -160,7 +160,7 @@ def main(config):
     time_frame = []
     
     N = translation.shape[0]
-    # N = 3
+    # N = 50
     for i in range(1, N):
         trans = translation[i - 1]
         pose = pose_body[i - 1]
@@ -168,7 +168,7 @@ def main(config):
         trans_next = translation[i]
         pose_next = pose_body[i]
 
-        steps = 16
+        steps = 10
         
         trans_lin = linspace(trans, trans_next, steps)
         pose_lin = linspace(pose, pose_next, steps)
@@ -232,9 +232,9 @@ def main(config):
     avg_disp_list = [disp.mean() for disp in vertex_disp_list]
     print(f'Average vertex displacement: {sum(avg_disp_list) / len(avg_disp_list)} m')
 
-    line_plot([reconstruction_error_list, reconstruction_error_template_list], 'Reconstruction Error', 'Distance (m)', ['Simulated', 'Template'], ['black', 'blue'])
-    line_plot([dvol_list, dvol_template_list], 'Volume Change', 'Volume Change', ['Volume Change Simulated', 'Volume Change Template'], ['black', 'blue'])
-    line_plot([avg_disp_list], '3D Vertex Displacement', 'Vertex Displacement (m)', ['Vertex Displacement'])
+    line_plot([reconstruction_error_list, reconstruction_error_template_list], 'Reconstruction Error', 'Distance (m)', ['Simulated', 'Template'], ['black', 'blue'], output_folder)
+    line_plot([dvol_list, dvol_template_list], 'Volume Change', 'Volume Change', ['Volume Change Simulated', 'Volume Change Template'], ['black', 'blue'], output_folder)
+    line_plot([avg_disp_list], '3D Vertex Displacement', 'Vertex Displacement (m)', ['Vertex Displacement'], output_folder=output_folder)
 
     result = {
         "dvol" : dvol_list,

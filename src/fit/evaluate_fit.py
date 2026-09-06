@@ -1,5 +1,4 @@
 from argparse import ArgumentParser
-import pickle
 
 import numpy as np
 import open3d as o3d
@@ -7,13 +6,15 @@ import matplotlib.pyplot as plt
 import torch
 
 from lib.HIT.hit.model.mysmpl import MySmpl
-from lib.SMPL import SMPL 
 
 import subprocess
-import re
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # TODO: Fix migrating SMPL to MySmpl
-def evaluate(points, target):
+def evaluate(model, target):
+    pcd = o3d.io.read_triangle_mesh(model)
+    points = torch.from_numpy(np.asarray(pcd.vertices))
+
     target_pcd = o3d.io.read_point_cloud(target)
     target_points = torch.from_numpy(np.asarray(target_pcd.points))
 
@@ -21,20 +22,9 @@ def evaluate(points, target):
     mean_error = dist.mean()
     return mean_error * 100
 
-def check_v2v(model: str, id: int, results: list):
-    # Load SMPL
-    with open('outputs/fit/smpl_fit_params.pkl', 'rb') as f:
-        param_dict = pickle.load(f)
-    
-    trans = param_dict['trans']
-    pose = param_dict['pose']
-    betas = param_dict['betas']
-
-    smpl = MySmpl('data/models', gender=model)
-    
-    points = smpl(trans, pose, betas)
+def check_v2v(id: int, results: list):
     target = f'data/target/tr_reg_{id:03d}.ply'
-    v2v = evaluate(points, target)
+    v2v = evaluate('outputs/fit/smpl_fit_mesh.obj', target)
 
     print(f"Final V2V to target mesh: {v2v:.4f}")
     results.append(v2v)
@@ -53,17 +43,20 @@ if __name__ == "__main__":
     model = ["male", "female", "male", "male", "female", "female", "female", "male", "female", "male"]
     index = 0
 
-    for i in range(0, 100, 2):
+    for i in range(0, 100):
         index = i // 10
         print(f"Logging tr_scan_{i:03d}")
-        proc = subprocess.Popen(["bash", "run.sh", f"data/input/tr_scan_{i:03d}.ply", model[index], ], stdout=subprocess.PIPE, text=True)
-        check_v2v(model, i, results)
+        proc = subprocess.Popen(["bash", "run.sh", f"data/input/tr_scan_{i:03d}.ply", model[index], "-n" ], stdout=subprocess.PIPE, text=True)
+        proc.communicate()
+        check_v2v(i, results)
 
-        proc = subprocess.Popen(["uv", "run", "fit.py", f"model.base_model={model[index]}", "model.init_epoch=0"], stdout=subprocess.PIPE, text=True)
-        check_v2v(model, i, results_no_init)     
+        proc = subprocess.Popen(["conda", "run", "-n", "hit", "python", "src/fit/fit.py", f"model.gender={model[index]}", "model.init_epoch=0"], stdout=subprocess.PIPE, text=True)
+        proc.communicate()
+        check_v2v(i, results_no_init)     
 
-        proc = subprocess.Popen(["uv", "run", "fit.py", f"model.base_model={model[index]}", "model.lambda_prior.pose_weight=0", "model.lambda_prior.shape_weight=0"], stdout=subprocess.PIPE, text=True)
-        check_v2v(model, i, results_no_reg)   
+        proc = subprocess.Popen(["conda", "run", "-n", "hit", "python",  "src/fit/fit.py", f"model.gender={model[index]}", "model.lambda_prior.pose_weight=0", "model.lambda_prior.shape_weight=0"], stdout=subprocess.PIPE, text=True)
+        proc.communicate()
+        check_v2v(i, results_no_reg)   
 
         # Switch model every 10 scans
 
@@ -78,7 +71,7 @@ if __name__ == "__main__":
     plt.ylabel("V2V")
     plt.title("V2V Error to Registrations")
 
-    plt.savefig("v2v_comparison_graph.png", dpi=300, bbox_inches="tight")
+    plt.savefig("outputs/fit/v2v_comparison_graph.png", dpi=300, bbox_inches="tight")
 
     print(f"Result: {mean(results)} cm")
     print(f"No init: {mean(results_no_init)} cm")

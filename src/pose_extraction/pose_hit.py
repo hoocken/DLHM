@@ -17,6 +17,8 @@ def main(config):
     pose_config = config.pose
     bdata = np.load(pose_config.data)
 
+    gender = bdata['gender'] if pose_config.gender is None else pose_config.gender
+
     with open('outputs/fit/smpl_fit_params.pkl', 'rb') as f:
         data_dict = pickle.load(f)
     
@@ -32,7 +34,7 @@ def main(config):
     weights = hit_dict['weights']
     meshes = hit_dict['meshes']
 
-    smpl = MySmpl('data/models', 'male').to(device)
+    smpl = MySmpl('data/models', gender).to(device)
 
     translation = torch.from_numpy(bdata['trans']).to(device=device, dtype=torch.float)
     pose_body = torch.from_numpy(bdata['poses'][:, :66])  # Joint 22 and 23 (hands) are not the same as SMPL
@@ -43,8 +45,9 @@ def main(config):
     
     for t in tissues:
         os.makedirs(f'outputs/motion_seg/{t}', exist_ok=True)
+    N = translation.shape[0]
 
-    for i in tqdm(range(0, 300, 10)):
+    for i in tqdm(range(N)):
         output = smpl(betas.unsqueeze(0), translation[i].unsqueeze(0), pose_body[i, 3:].unsqueeze(0),  pose_body[i, :3].unsqueeze(0))
         for c in range(len(tissues)):
             # print(translation[i].shape, pose_body[i].shape, betas.shape)
