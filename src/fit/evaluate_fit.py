@@ -10,7 +10,7 @@ from lib.HIT.hit.model.mysmpl import MySmpl
 import subprocess
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# TODO: Fix migrating SMPL to MySmpl
+
 def evaluate(model, target):
     pcd = o3d.io.read_triangle_mesh(model)
     points = torch.from_numpy(np.asarray(pcd.vertices))
@@ -35,10 +35,8 @@ if __name__ == "__main__":
     results = []
     # No initialization
     results_no_init = []
-    # No pose reg
+    # No reg
     results_no_reg = []
-    # No shape reg
-    results_no_shape_reg = []
 
     model = ["male", "female", "male", "male", "female", "female", "female", "male", "female", "male"]
     index = 0
@@ -58,15 +56,11 @@ if __name__ == "__main__":
         proc.communicate()
         check_v2v(i, results_no_reg)   
 
-        # Switch model every 10 scans
-
     categories = ["Normal", "No Init", "No Reg"]
     values = [mean(results), mean(results_no_init), mean(results_no_reg)]
 
-    # 2. Create the bar graph
     plt.bar(categories, values, color=["#1f77b4", "#ff7f0e", "#2ca02c"])
 
-    # 3. Add labels and title
     plt.xlabel("Categories")
     plt.ylabel("V2V")
     plt.title("V2V Error to Registrations")

@@ -4,7 +4,6 @@ Optimize a given model with a 3d point cloud using Chamfer distance
 from pathlib import Path
 import pickle
 
-import hydra
 import open3d as o3d
 import torch
 import torch.nn as nn
@@ -88,7 +87,6 @@ class Registration(nn.Module):
         self.trans = nn.Parameter(torch.zeros((1, 3), dtype=torch.float32))
         self.pose = nn.Parameter(initial_pose[None, :])
         self.global_orient = nn.Parameter(torch.zeros((1, 3), dtype=torch.float32))
-        # self.pose = nn.Parameter(torch.hstack([torch.zeros((1, 3), dtype=torch.float32), initial_pose]))
         self.betas = nn.Parameter(torch.zeros((1, self.smpl.nb_betas), dtype=torch.float32))
 
     def _prepare_point_cloud(self, segmentations: str):
@@ -172,6 +170,7 @@ class Registration(nn.Module):
         for i in range(self.init_epoch):
             output = self.smpl(torch.zeros_like(self.betas), self.trans, self.pose, self.global_orient)
             model = output.vertices.squeeze()
+
             # Calculate model centroids
             model_centroids = self._calculate_model_centroids(model)
         
@@ -222,7 +221,6 @@ class Registration(nn.Module):
                 patience = 0
                 self.lambda_prior_pose = self.lambda_prior_pose * self.lambda_decay_strength
                 self.lambda_prior_shape = self.lambda_prior_shape * self.lambda_decay_strength
-            # total_loss = data
             
             self.optimizer.zero_grad()
             
@@ -255,7 +253,7 @@ class Registration(nn.Module):
         output = self.smpl(self.betas, self.trans, self.pose, self.global_orient)
         mesh = trimesh.Trimesh(vertices=output.vertices.squeeze().detach().cpu(), faces=output.faces)
         mesh.export(self.output_dir / f'smpl_fit_mesh.obj')
-        # self.smpl.save_obj(self.smpl(self.trans, self.pose, self.betas), fname=self.output_dir / f'smpl_fit_{self.name}.obj')
+        
         result = {
             "trans" : torch.zeros_like(self.trans.squeeze().cpu()) , # Zero out the translation
             "pose" : torch.zeros(self.pose.shape[1] + self.global_orient.shape[1]), # Zero out the pose

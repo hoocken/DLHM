@@ -35,13 +35,7 @@ def predict_occ_from_points(points, hl, data, device):
         [ 0, 0, 255, 255]   # Blue: BT
     ], dtype=np.uint8)
 
-
-    # with open(f'{out_folder}/hit_query_points.pkl', 'wb') as f:
-    #     pickle.dump(data_dict, f)
-
     rgba_colors = class_colors[np.argmax(pred, axis=1)]
-
-    print(rgba_colors.shape)
 
     point_cloud = trimesh.PointCloud(vertices=points, colors=rgba_colors)
     point_cloud.export("classified_cloud.ply")
@@ -69,7 +63,6 @@ def line_plot(list_values, title, y_title, labels, colors=['black'], output_fold
     for i in range(len(list_values)):
         plt.plot(x, list_values[i], label=labels[i], color=colors[i], linestyle='-', linewidth=2)
 
-    # 3. Add titles and labels
     plt.title(title)
     plt.xlabel("Frames")
     plt.ylabel(y_title)
@@ -117,6 +110,7 @@ def main(config):
     output_folder = 'outputs/motion_soft'
     frames_folder = output_folder + '/frames'
 
+    # Clean output
     shutil.rmtree(output_folder)
     os.makedirs(output_folder, exist_ok=True)
     os.makedirs(frames_folder, exist_ok=True)
@@ -160,7 +154,7 @@ def main(config):
     time_frame = []
     
     N = translation.shape[0]
-    # N = 50
+    
     for i in range(1, N):
         trans = translation[i - 1]
         pose = pose_body[i - 1]

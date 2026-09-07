@@ -26,7 +26,6 @@ class Tetrahedralize():
         self.out_folder = 'outputs/tet_mesh'
 
     def create_tetrahedra_mesh(self):
-        # mesh = self.combine_mesh(self.smpl_path, self.lean_mesh_path)
         mesh = pv.read(self.smpl_path)
 
         # Triangulate it to extract raw vertex and face matrices
@@ -43,7 +42,6 @@ class Tetrahedralize():
 
         print("Fixing self-intersections and generating volume mesh...")
         tgen = tetgen.TetGen(cleaned_mesh)
-        # tet_vertices, tet_cells = pytetwild.tetrahedralize(vertices, faces, edge_length_abs=0.2)
 
         tgen.tetrahedralize(
             mindihedral=10.0,
@@ -72,4 +70,3 @@ class Tetrahedralize():
 if __name__ == "__main__":
     tet = Tetrahedralize("outputs/hit_best/smpl_mesh.obj") # hit_best if using soft tissue
     tet.create_tetrahedra_mesh()
-    # tet.plot()

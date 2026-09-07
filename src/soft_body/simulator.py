@@ -38,9 +38,9 @@ class Simulator():
         self.mesh.cell_data['is_surface'][surface_cell_ids] = True
 
         # Mark all points with lean tissue
-        # self.mesh.point_data['is_lean'] = tissue_class == 1
         self.weights = weights.squeeze()
         self.part_ids = torch.argmax(self.weights, axis=1)
+        
         # Pin hands, feet, and head
         mask = (self.part_ids >= 20) | \
                 (self.part_ids == 7) | \

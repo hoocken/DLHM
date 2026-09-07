@@ -26,12 +26,6 @@ def main(config):
 
     print(f"Final loss: {loss}")
 
-    # id = optimizer.name.split('_')[-1]
-    # target = Path() / 'data/target' / f'tr_reg_{id}.ply'
-    # v2v = optimizer.evaluate(target)
-
-    # print(f"Final V2V to target mesh: {v2v:.4f}")
-
     if config.model.save_model:
         print(f"Saving SMPL model!")
         optimizer.save_smpl()

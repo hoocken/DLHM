@@ -1,11 +1,8 @@
-import numpy as np
 import torch
 from pyvista import UnstructuredGrid
 import pyvista as pv
 from torch_sla import SparseTensor
-from torchtyping import TensorType
-from collections import defaultdict
-from torch.func import vmap, jacrev, hessian
+from torch import Tensor
 
 class FEM():
     def __init__(
@@ -148,7 +145,7 @@ class FEM():
             R[:, i*3:i*3+3, i*3:i*3+3] = rotation_3x3
         return R
     
-    def _assemble_Kp(self, rotation: TensorType["points", 12, 12]):
+    def _assemble_Kp(self, rotation: Tensor):
         """
         Calculate global rotational stiffness matrix. K' for a node is \sum_e R_e @ K_e @ R_e.T, where
         it is summed over every tetrahedral element with this node.
@@ -245,9 +242,8 @@ class FEM():
     def calculate_R_shape_matching(self, weights=None):
         """
         Per-tet rotation via energy-minimization / shape matching
-        (Müller et al. 2005), as used by Georgii & Westermann 2008
-        in place of polar-decomposition-of-F for stability under
-        large stretch.
+        (Müller et al. 2005) in place of polar-decomposition-of-F 
+        for stability under large stretch.
 
         Finds R minimizing sum_i w_i * ||R(X_i - c0) - (x_i - c)||^2
         for each tet's 4 vertices -- i.e. the best rigid alignment of
@@ -287,19 +283,19 @@ class FEM():
         R = (V * d.unsqueeze(1)) @ U.transpose(-2, -1)   # (T,3,3)
         return R
 
-    def ground_penalty_force(self, gravity: TensorType["points"], v: TensorType["points"], ground_y=0.0, k=5, friction=0.5):
+    def ground_penalty_force(self, gravity: Tensor, v: Tensor, ground_y=0.0, k=5, friction=0.5):
         """
         Calculates penalty force for touching the ground and the friction.
 
         Parameters:
-            gravity (Tensor of shape (N)): Gravity force working on the object.
-            v (Tensor of shape (N)): Velocity of each element.
-            ground_y (float): y-level of the ground.
-            k (int): Multiplicative factor of the penalty force.
-            friction (float): Friction coefficient of the ground.
+            gravity: Gravity force working on the object.
+            v: Velocity of each element.
+            ground_y: y-level of the ground.
+            k: Multiplicative factor of the penalty force.
+            friction: Friction coefficient of the ground.
 
         Returns:
-            f (Tensor of shape (N)): Updated force with penalty.
+            f: Updated force with penalty.
         """
         pen = ground_y - self.points[:, 1]
         gravity = gravity.reshape(-1, 3)
