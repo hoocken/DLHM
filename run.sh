@@ -8,7 +8,7 @@ print_help() {
     echo "  -h, --help    Show this help message and exit"
     echo "  -m <MOTION>   Input motion to animate segmentations. If -n is set, then this step is skipped."
     echo "  -n            Skip HIT segmentation"    
-    echo "  -s <MOTION>   Soft body animation"    
+    echo "  -s <MOTION>   Soft body animation. If -n is set, then this step is skipped."    
     echo ""
     echo "Example:"
     echo "  $0 data/input/tr_scan_066.ply female -m data/motion/Jog_3_poses.npz"
