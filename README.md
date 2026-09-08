@@ -50,9 +50,9 @@ To install it, go to the directory:
 cd lib/HIT
 ```
 
-and then do follow the steps in `lib/HIT/README.md` to fully install the library.
+and then do follow the steps in [lib/HIT/README.md](lib/HIT/README.md) to fully install the library.
 
-### Tetrahedralize
+### uv
 For the soft body animation, we use PyTetGen which is installed to another virtual environment, which is managed by [uv](https://docs.astral.sh/uv/). See their website for the full installation tutorial.
 
 After installing uv, run

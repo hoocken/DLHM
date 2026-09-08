@@ -8,6 +8,8 @@ conda create -n 'hit' python=3.8
 ```
 
 #### Install packages
+From now on, we assume that you are currently in the local directory of `lib/HIT/`.
+
 Check your CUDA toolkit version
 ```shell
 nvcc --version
@@ -30,7 +32,6 @@ pip install -e .
 
 The **LEAP** package is used for its marching cube implementation and creating ground truth occupancy. Install it with:
 ```shell
-cd hit
 mkdir external
 cd external 
 git clone https://github.com/neuralbodies/leap.git
