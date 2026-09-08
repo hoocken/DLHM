@@ -1,5 +1,5 @@
 # HIT
-Taken from https://github.com/MarilynKeller/HIT.
+Taken from https://github.com/MarilynKeller/HIT. This README is modified from its original state.
 
 ## Installation
 Setup a virtual env
@@ -37,4 +37,19 @@ git clone https://github.com/neuralbodies/leap.git
 cd leap
 python setup.py build_ext --inplace
 pip install -e .
+```
+
+## Pretrained Models
+To download pretrained HIT networks, go to the download tab at https://hit.is.tue.mpg.de/ and create a `pretrained` folder in this local directory, so `lib/HIT/pretrained`. Then you should have it in the following hierarchy:
+
+```
+${HIT}
+├── pretrained
+│   ├── hit_female
+│       ├── ckpt
+│       └── config.yaml
+│   └── hit_male
+│       └── ...
+├── hit
+└── ...
 ```

@@ -2,7 +2,6 @@ import torch
 from pyvista import UnstructuredGrid
 import pyvista as pv
 from torch_sla import SparseTensor
-from torch import Tensor
 
 class FEM():
     def __init__(
@@ -145,7 +144,7 @@ class FEM():
             R[:, i*3:i*3+3, i*3:i*3+3] = rotation_3x3
         return R
     
-    def _assemble_Kp(self, rotation: Tensor):
+    def _assemble_Kp(self, rotation):
         """
         Calculate global rotational stiffness matrix. K' for a node is \sum_e R_e @ K_e @ R_e.T, where
         it is summed over every tetrahedral element with this node.
@@ -178,7 +177,7 @@ class FEM():
         f0 = f0.index_add_(0, self.dof.reshape(-1), f0_local.reshape(-1))
         return f0
 
-    def solve_v_next(self, v: TensorType["points"], rotation, f_ext, dt):
+    def solve_v_next(self, v, rotation, f_ext, dt):
         """
         Calculate v_{t+1} with Euler implicit integration by solving this equation:
 
@@ -283,7 +282,7 @@ class FEM():
         R = (V * d.unsqueeze(1)) @ U.transpose(-2, -1)   # (T,3,3)
         return R
 
-    def ground_penalty_force(self, gravity: Tensor, v: Tensor, ground_y=0.0, k=5, friction=0.5):
+    def ground_penalty_force(self, gravity, v, ground_y=0.0, k=5, friction=0.5):
         """
         Calculates penalty force for touching the ground and the friction.
 

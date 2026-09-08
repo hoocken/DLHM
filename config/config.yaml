@@ -3,8 +3,8 @@ defaults:
   - override hydra/job_logging: disabled
   - override hydra/hydra_logging: disabled
 
-pose:
-  data: 'data/motion/Box_3_poses.npz'
+animate:
+  data: data/motion/50004_jumping_jacks_poses.npz
   gender: female
 
 model:
@@ -26,12 +26,12 @@ model:
   sigma: 2
   save_model: True
 
-animate:
+soft_body:
   data: data/motion/50020_jiggle_on_toes_poses.npz
   path: outputs/tet_mesh/tet_mesh.vtu
   exp_name: hit_female
   target_body: outputs/fit/smpl_fit_params.pkl
-  motion_gt: /home/anthony/Projects/Dyna/50020_jiggle_on_toes
+  motion_gt:
   plot: True
 
 hydra:

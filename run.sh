@@ -2,15 +2,16 @@
 
 # Function to print usage guidelines
 print_help() {
-    echo "Usage: $0 <INPUT> <male | female> -m <MOTION>"
+    echo "Usage: $0 <INPUT> <male | female> [-m <MOTION>]"
     echo ""
     echo "Options:"
     echo "  -h, --help    Show this help message and exit"
-    echo "  -m            Input motion to animate segmentations"
+    echo "  -m <MOTION>   Input motion to animate segmentations. If -n is set, then this step is skipped."
     echo "  -n            Skip HIT segmentation"    
+    echo "  -s <MOTION>   Soft body animation"    
     echo ""
     echo "Example:"
-    echo "  $0 data/input/tr_scan_066.ply female --motion data/motion/Jog_3_poses.npz"
+    echo "  $0 data/input/tr_scan_066.ply female -m data/motion/Jog_3_poses.npz"
 }
 
 # Check if the user asked for help explicitly
@@ -20,6 +21,7 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
 fi
 
 MOTION=""
+SOFT_MOTION=""
 HIT=true
 POSITIONAL=()
 
@@ -32,6 +34,15 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             MOTION="$2"
+            shift 2
+            ;;
+        -s)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: -s requires a value." >&2
+                print_help
+                exit 1
+            fi
+            SOFT_MOTION="$2"
             shift 2
             ;;
         -n)
@@ -126,16 +137,29 @@ echo "---------------------------------------------------"
 # Run HIT
 python lib/HIT/demos/infer_smpl.py --exp_name="$EXPERIMENT_NAME" --to_infer smpl_file --target_body outputs/fit/smpl_fit_params.pkl
 
-if [[ "$MOTION" == "" ]]; then
-    exit 0
+if [[ "$MOTION" != "" ]]; then
+    echo "---------------------------------------------------"
+    echo "|                     MOTION                      |"
+    echo "---------------------------------------------------"
+
+    # Pose HIT
+    python src/animate/animate_hit.py animate.data="$MOTION"
 fi
 
+if [[ "$SOFT_MOTION" != "" ]]; then
+    # Tetrahedralize obj mesh from HIT
+    echo "---------------------------------------------------"
+    echo "|                 TETRAHEDRALIZE                  |"
+    echo "---------------------------------------------------"
 
-echo "---------------------------------------------------"
-echo "|                     MOTION                      |"
-echo "---------------------------------------------------"
+    uv run src/soft_body/create_tetrahedral_mesh.py
 
-# Pose HIT
-python src/pose_extraction/pose_hit.py pose.data="$MOTION"
+    # Soft tissue animation
+    echo "---------------------------------------------------"
+    echo "|             SOFT TISSUE ANIMATION               |"
+    echo "---------------------------------------------------"
+
+    python src/soft_body/animate_smpl.py soft_body.data="$SOFT_MOTION" soft_body.exp_name="$EXPERIMENT_NAME"
+fi
 
 conda deactivate

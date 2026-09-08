@@ -51,6 +51,7 @@ class Registration(nn.Module):
         self.path = config.base_model
         
         self.output_dir = Path('outputs/fit')
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.smpl = MySmpl(self.path, config.gender).to(self.device)

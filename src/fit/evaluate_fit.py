@@ -1,11 +1,7 @@
-from argparse import ArgumentParser
-
 import numpy as np
 import open3d as o3d
 import matplotlib.pyplot as plt
 import torch
-
-from lib.HIT.hit.model.mysmpl import MySmpl
 
 import subprocess
 

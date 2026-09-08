@@ -1,8 +1,4 @@
-# Downsample the mesh
-# Create tetrahedral mesh from semgentation
-# Compose them all 
-import os
-import pickle
+from pathlib import Path
 
 import numpy as np
 import pyvista as pv
@@ -23,7 +19,8 @@ class Tetrahedralize():
         self.smpl_path = smpl_path
         self.tet_mesh: pv.UnstructuredGrid | None = None
 
-        self.out_folder = 'outputs/tet_mesh'
+        self.out_folder = Path('outputs/tet_mesh')
+        self.out_folder.mkdir(parents=True, exist_ok=True)
 
     def create_tetrahedra_mesh(self):
         mesh = pv.read(self.smpl_path)
@@ -52,7 +49,7 @@ class Tetrahedralize():
         print(f"Success! Generated {tet_mesh.n_cells} tetrahedra.")
 
         self.tet_mesh = tet_mesh
-        self.tet_mesh.save(f'{self.out_folder}/tet_mesh.vtu')
+        self.tet_mesh.save(self.out_folder / 'tet_mesh.vtu')
 
     def plot(self):
         if self.tet_mesh is None:

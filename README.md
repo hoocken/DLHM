@@ -42,8 +42,18 @@ pip3 install numpy==1.26.0
 
 You may need to fix some dependency issues that arises. If you have problems regarding MinkowskiEngine compilation, downgrade gcc and g++ to version 9 and export the compiler version as an environment variable.
 
-### Fitting
-This repository uses [uv](https://docs.astral.sh/uv/) as a package manager. See their website for details on installation.
+### HIT
+For the SMPL code and HIT network, we use the repository from [HIT](https://github.com/MarilynKeller/HIT). 
+
+To install it, go to the directory:
+```sh
+cd lib/HIT
+```
+
+and then do follow the steps in `lib/HIT/README.md` to fully install the library.
+
+### Tetrahedralize
+For the soft body animation, we use PyTetGen which is installed to another virtual environment, which is managed by [uv](https://docs.astral.sh/uv/). See their website for the full installation tutorial.
 
 After installing uv, run
 ```sh
@@ -52,28 +62,81 @@ uv sync
 to install all required libraries.
 
 ### SMPL Model
-You can download the SMPL model from https://smpl.is.tue.mpg.de/.
+You can download the SMPL model from https://smpl.is.tue.mpg.de/. Create a `models` folder in `data` and put the SMPL models in `data/models/smpl`, resulting in the following hierarchy:
+```
+.
+├── data
+│   ├── models
+│       ├── SMPL_MALE.pkl
+│       └── SMPL_FEMALE.pkl
+│   └── ...
+```
 
 ## Usage
-To run the fitting, put your input in `data/input/` and the SMPL models in `data/models/`. Afterwards, set the path
-to the SMPL model in `config/config.yaml`. Then run
+To run the fitting, you can put your ipnuts in the `data` folder. Then run
 ```sh
-bash run.sh data/input/<input_file>.ply data/ckpts/human3d.ckpt
+bash run.sh --help
+```
+for further instructions on running the script.
+
+You can configure the parameters in `config/config.yaml` for different stages of the pipeline.
+
+Your results will be available in the `outputs` folder with the following information:
+```
+outputs
+├── fit # Results from fitting 
+├── hit_best # Results from HIT, which contains tissue meshes
+├── human3d_segs # Results from human3d segmentation       
+├── motion # Results from SMPL animation 
+├── motion_seg # Results from rigged tissue animation 
+├── motion_soft # Results from soft tissue animation
+└── tet_mesh # Results from tetrahedralization of SMPL mesh
 ```
 
-If you just want to run the fitting on a segmentation result, run
+The results in `motion_seg` and `motion_soft` are OBJ sequences which can be played and rendered as a video with the OBJSequence addon from Blender (https://extensions.blender.org/add-ons/stop-motion-obj2/).
+
+## Animate SMPL
+To only animate the SMPL model fitted from the fitting stage, run
 ```sh
-uv run fit.py
+bash run.sh <INPUT> <GENDER> -n
+```
+to only fit but skip HIT segmentations. Then set your desired motion for `pose.data` in `config/config.yaml` and run
+```sh
+uv run src/animate/animate_model.py
 ```
 
-Your fitted model will be available in `outputs/<date>/<time>/`. The segmentation results is viewable in `outputs/human3d_segs`.
+The output will be in `outputs/motion/motion.npz`, where you can use the SMPL Blender addon (https://github.com/Meshcapade/SMPL_blender_addon) and add this file as animation.
+
+### Metrics
+#### Fitting
+To measure the fitting with FAUST, you need to put all FAUST training data into `data/input` and `data/target`. Then run
+```sh
+uv run src/fit/evaluate_fit.py
+```
+
+#### Soft Tissue Animation
+To measure the reconstruction error of soft tissue animation, go to `config/config.yaml` and put the desired path into `motion_gt` for the ground truth scan and `data` for the motion. Then run
+```sh
+conda activate hit
+python src/soft_body/extract_shape_from_motion.py
+```
+which produces the SMPL parameters from the motion file. Then run the tetrahedralizer:
+```sh
+uv run src/soft_body/create_tetrahedral_mesh.py
+```
+and then the animation.
+```sh
+python src/soft_body/animate_smpl.py
+```
+
+Automatically, it should print out the reconstruction error and also graph the error over time.
 
 ## Libraries
-### SMPL
-Base SMPL code for PyTorch in Python 3.11 is taken from https://github.com/Pokerlishao/SMPL-py311 with modifications. 
-
 ### SMPL Prior
 SMPL Prior is taken from https://github.com/DavidBoja/SMPL-Fitting.
 
 ### Human3D
 [Human3D](https://github.com/human-3d/Human3D) is taken from [SegFit](https://github.com/segfit/segfit), with minor modifications regarding the rotation of the point clouds to ensure correct segmentation. The checkpoints are taken from SegFit.
+
+### HIT
+[HIT](https://github.com/MarilynKeller/HIT) is taken directly from the website with modifications.

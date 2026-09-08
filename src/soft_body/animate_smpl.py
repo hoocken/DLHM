@@ -1,6 +1,7 @@
+from pathlib import Path
+
 import hydra
 from matplotlib import pyplot as plt
-from lib.HIT.hit.model.mysmpl import MySmpl
 import torch
 import numpy as np
 import pyvista as pv
@@ -19,7 +20,7 @@ from lib.HIT.hit.utils.model import HitLoader
 from lib.HIT.hit.utils.data import load_smpl_data
 from lib.HIT.hit.model.deformer import skinning
 
-def predict_occ_from_points(points, hl, data, device):
+def predict_occ_from_points(points, hl, data, device, output_folder):
     device = torch.device(device)
     # Extract the mesh 
     pred, weights = hl.hit_model.forward_points(data['betas'], points, 
@@ -38,7 +39,7 @@ def predict_occ_from_points(points, hl, data, device):
     rgba_colors = class_colors[np.argmax(pred, axis=1)]
 
     point_cloud = trimesh.PointCloud(vertices=points, colors=rgba_colors)
-    point_cloud.export("classified_cloud.ply")
+    point_cloud.export(f"{output_folder}/classified_cloud.ply")
 
     print("Finished querying occupancies and skinning weights!")
 
@@ -74,18 +75,18 @@ def line_plot(list_values, title, y_title, labels, colors=['black'], output_fold
 
 @hydra.main(version_base=None, config_name='config', config_path='../../config')
 def main(config):
-    animate_config = config.animate
-    target_body = animate_config.target_body
-    motion_gt = animate_config.motion_gt
-    plot = True if animate_config.plot else False
+    soft_body_config = config.soft_body
+    target_body = soft_body_config.target_body
+    motion_gt = soft_body_config.motion_gt
+    plot = True if soft_body_config.plot else False
 
-    bdata = np.load(animate_config.data)
+    bdata = np.load(soft_body_config.data)
 
-    mesh = pv.read(animate_config.path)
+    mesh = pv.read(soft_body_config.path)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Load HIT model
-    hl = HitLoader.from_expname(animate_config.exp_name, ckpt_choice='best')
+    hl = HitLoader.from_expname(soft_body_config.exp_name, ckpt_choice='best')
     hl.load()
     hl.hit_model.apply_compression = False
 
@@ -94,11 +95,20 @@ def main(config):
     assert os.path.exists(target_body), f'SMPL file "{target_body}" does not exist'
     data = load_smpl_data(target_body, device)
 
+    output_folder = 'outputs/motion_soft'
+    frames_folder = output_folder + '/frames'
+
+    # Clean output
+    shutil.rmtree(output_folder, ignore_errors=True)
+    os.makedirs(output_folder, exist_ok=True)
+    os.makedirs(frames_folder, exist_ok=True)
+
     pred, weights = predict_occ_from_points(
         mesh.points,
         hl,
         data,
         device,
+        output_folder,
     )
 
     betas = data['betas'].to(device=device, dtype=torch.float).squeeze()
@@ -106,15 +116,7 @@ def main(config):
     pred_class = np.argmax(pred, axis=1)
 
     fps = 60
-
-    output_folder = 'outputs/motion_soft'
-    frames_folder = output_folder + '/frames'
-
-    # Clean output
-    shutil.rmtree(output_folder)
-    os.makedirs(output_folder, exist_ok=True)
-    os.makedirs(frames_folder, exist_ok=True)
-
+    
     translation = torch.from_numpy(bdata['trans']).to(device=device, dtype=torch.float)
     pose_body = torch.from_numpy(bdata['poses'][:, :66])  # Joint 22 and 23 (hands) are not the same as SMPL
     pose_body = torch.cat((pose_body, torch.zeros(pose_body.shape[0], 6)), dim=1).to(device=device, dtype=torch.float)
@@ -130,6 +132,7 @@ def main(config):
         damping=0.01,
         dt=0.001,
         plot=plot,
+        output_folder=output_folder,
     )
 
     output = hl.smpl(betas=betas.unsqueeze(0), body_pose=hl.smpl.x_cano().to(betas.device))
@@ -199,13 +202,14 @@ def main(config):
         dvol_template_list.append(dvol_template.cpu().numpy())
 
         # Reconstruction error
-        gt_points = get_points_from_obj(f"{motion_gt}/{i:05d}.obj")
-        points = torch.from_numpy(sim.mesh.points[smpl_idx])
-        reconstruction_error = torch.norm(points - gt_points, dim=-1).mean()
-        reconstruction_error_list.append(reconstruction_error)
+        if motion_gt is not None:
+            gt_points = get_points_from_obj(f"{motion_gt}/{i:05d}.obj")
+            points = torch.from_numpy(sim.mesh.points[smpl_idx])
+            reconstruction_error = torch.norm(points - gt_points, dim=-1).mean()
+            reconstruction_error_list.append(reconstruction_error)
 
-        reconstruction_error_template = torch.norm(output.vertices.cpu() - gt_points, dim=-1).mean()
-        reconstruction_error_template_list.append(reconstruction_error_template)
+            reconstruction_error_template = torch.norm(output.vertices.cpu() - gt_points, dim=-1).mean()
+            reconstruction_error_template_list.append(reconstruction_error_template)
 
         mesh = sim.mesh.extract_surface()
         mesh.save(frames_folder + f'/frame_{i}.obj')
@@ -218,16 +222,18 @@ def main(config):
     print(f'Average step time: {sum(time_step) / len(time_step)} seconds')
     print(f'Average frame time: {sum(time_frame) / len(time_frame)} seconds')
 
-    print(f'Average reconstruction error: {sum(reconstruction_error_list) / len(reconstruction_error_list)} m')
-    print(f'Average reconstruction error template: {sum(reconstruction_error_template_list) / len(reconstruction_error_template_list)} m')
+    if len(reconstruction_error_list) > 0:
+        print(f'Average reconstruction error: {sum(reconstruction_error_list) / len(reconstruction_error_list)} m')
+        print(f'Average reconstruction error template: {sum(reconstruction_error_template_list) / len(reconstruction_error_template_list)} m')
+        line_plot([reconstruction_error_list, reconstruction_error_template_list], 'Reconstruction Error', 'Distance (m)', ['Simulated', 'Template'], ['black', 'blue'], output_folder)
+
     print(f'Average vol change: {sum(dvol_list) / len(dvol_list)} m3')
     print(f'Average vol change template: {sum(dvol_template_list) / len(dvol_template_list)} m3')
+    line_plot([dvol_list, dvol_template_list], 'Volume Change', 'Volume Change', ['Volume Change Simulated', 'Volume Change Template'], ['black', 'blue'], output_folder)
 
     avg_disp_list = [disp.mean() for disp in vertex_disp_list]
     print(f'Average vertex displacement: {sum(avg_disp_list) / len(avg_disp_list)} m')
 
-    line_plot([reconstruction_error_list, reconstruction_error_template_list], 'Reconstruction Error', 'Distance (m)', ['Simulated', 'Template'], ['black', 'blue'], output_folder)
-    line_plot([dvol_list, dvol_template_list], 'Volume Change', 'Volume Change', ['Volume Change Simulated', 'Volume Change Template'], ['black', 'blue'], output_folder)
     line_plot([avg_disp_list], '3D Vertex Displacement', 'Vertex Displacement (m)', ['Vertex Displacement'], output_folder=output_folder)
 
     result = {

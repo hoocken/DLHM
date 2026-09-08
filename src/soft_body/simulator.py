@@ -141,7 +141,9 @@ class Simulator():
 
     def _setup_plotter(self):
         self.plotter = pv.Plotter()
-        self.plotter.open_gif(f"{self.output_folder}/mesh_animation.gif")
+
+        if self.output_folder is not None:
+            self.plotter.open_gif(f"{self.output_folder}/mesh_animation.gif")
 
         self.actor = self.plotter.add_mesh(
             self.mesh, cmap="YlOrRd", 
@@ -191,7 +193,8 @@ class Simulator():
 
         self.plotter.update()
 
-        self.plotter.write_frame()
+        if self.output_folder is not None:
+            self.plotter.write_frame()
 
     def _make_velocity_glyphs(self, points, v, points_count, scale=1):
         pts = points.detach().cpu().numpy()
