@@ -73,7 +73,7 @@ You can download the SMPL model from https://smpl.is.tue.mpg.de/. Create a `mode
 ```
 
 ## Usage
-To run the fitting, you can put your ipnuts in the `data` folder. Then run
+To run the fitting, you can put your inputs in the `data` folder. Then run
 ```sh
 bash run.sh --help
 ```
