@@ -5,6 +5,7 @@ Taken from https://github.com/MarilynKeller/HIT. This README is modified from it
 Setup a virtual env
 ```
 conda create -n 'hit' python=3.8
+conda activate hit
 ```
 
 #### Install packages
